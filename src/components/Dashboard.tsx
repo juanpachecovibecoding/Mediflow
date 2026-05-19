@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { User, signOut } from 'firebase/auth';
 import { doc, onSnapshot, updateDoc, deleteDoc, serverTimestamp, collection, addDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { LogOut, QrCode, MessageCircle, Settings, Calendar, User as UserIcon, Bot, ArrowRight, ShieldCheck, CreditCard, Lock, Menu, X, HelpCircle, Send, Phone, PhoneOff, Mic } from 'lucide-react';
+import { LogOut, QrCode, MessageCircle, Settings, Calendar, User as UserIcon, Bot, ArrowRight, ShieldCheck, CreditCard, Lock, Menu, X, HelpCircle, Send, Phone, PhoneOff, Mic, Sparkles } from 'lucide-react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import Markdown from 'react-markdown';
 import { LATAM_COUNTRIES } from '../constants';
@@ -689,8 +689,9 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
           if (data.messagesUsed != null && clinic && data.messagesUsed > (clinic.messagesUsed || 0)) {
              let updates: any = { messagesUsed: data.messagesUsed, updatedAt: serverTimestamp() };
              // If limit reached, automatically deactivate bot
-             const currentPlan = clinic.plan || 'GRATIS';
-             const planLimit = systemLimits[currentPlan as keyof typeof systemLimits] || 0;
+             const trialActive = clinic.trialEndsAt && clinic.trialEndsAt > Date.now();
+             const currentPlanObj = trialActive ? 'PREMIUM' : (clinic.plan || 'GRATIS');
+             const planLimit = systemLimits[currentPlanObj as keyof typeof systemLimits] || 0;
              if (data.messagesUsed >= planLimit && clinic.botActive) {
                 updates.botActive = false;
              }
@@ -871,10 +872,44 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
     }
   };
 
-  const currentPlan = clinic?.plan || 'GRATIS';
+  const hasHadTrial = !!clinic?.trialEndsAt;
+  const isTrialActive = hasHadTrial && clinic.trialEndsAt > Date.now();
+  const currentPlan = isTrialActive ? 'PREMIUM' : (clinic?.plan || 'GRATIS');
   const planLimit = systemLimits[currentPlan as keyof typeof systemLimits] || 0;
   const messagesUsed = clinic?.messagesUsed || 0;
   const isLimitReached = messagesUsed >= planLimit;
+
+  const [trialTimeLeft, setTrialTimeLeft] = useState({ days: 0, hours: 0 });
+
+  useEffect(() => {
+    if (!clinic?.trialEndsAt) return;
+    const calculateTime = () => {
+       const diff = clinic.trialEndsAt - Date.now();
+       if (diff > 0) {
+          setTrialTimeLeft({
+             days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+             hours: Math.floor((diff / (1000 * 60 * 60)) % 24)
+          });
+       } else {
+          setTrialTimeLeft({ days: 0, hours: 0 });
+       }
+    };
+    calculateTime();
+    const interval = setInterval(calculateTime, 1000 * 60);
+    return () => clearInterval(interval);
+  }, [clinic?.trialEndsAt]);
+
+  const handleStartTrial = async () => {
+     try {
+        const trialEndsAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+        await updateDoc(doc(db, 'clinics', user.uid), {
+           trialEndsAt,
+           updatedAt: serverTimestamp()
+        });
+     } catch (e) {
+        console.error("Error starting trial:", e);
+     }
+  };
 
   const handleSimulatorSend = async () => {
     if (!simulatorInput.trim() || isSimulatorGenerating) return;
@@ -1035,11 +1070,31 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                </h2>
              </div>
           </div>
-          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
-            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
-                {clinic?.name?.charAt(0) || user.email?.charAt(0) || 'U'}
-            </div>
-            <span className="text-sm font-bold text-slate-700 hidden md:block">{clinic?.name || 'Mi Clínica'}</span>
+          <div className="flex items-center gap-3">
+             {!hasHadTrial && clinic?.plan !== 'PREMIUM' && (
+                <button
+                  onClick={handleStartTrial}
+                  className="animate-fluctuate bg-[#EFF8FD] hover:bg-sky-50 text-sky-900 font-black py-2 px-4 rounded-full text-xs md:text-sm border-2 transition-all flex items-center gap-2"
+                >
+                   <Sparkles className="w-4 h-4 text-[#EBA313]" />
+                   <span>Pásate a Premium <span className="hidden sm:inline">7 días gratis</span></span>
+                </button>
+             )}
+             {isTrialActive && clinic?.plan !== 'PREMIUM' && (
+                <button
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="animate-fluctuate bg-[#EFF8FD] hover:bg-sky-50 text-sky-900 font-black py-2 px-4 rounded-full text-xs md:text-sm border-2 transition-all flex items-center gap-2"
+                >
+                   <Sparkles className="w-4 h-4 text-[#EBA313]" />
+                   <span>Hazte Premium <span className="hidden sm:inline font-normal">({trialTimeLeft.days}d {trialTimeLeft.hours}h)</span></span>
+                </button>
+             )}
+             <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+               <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
+                   {clinic?.name?.charAt(0) || user.email?.charAt(0) || 'U'}
+               </div>
+               <span className="text-sm font-bold text-slate-700 hidden md:block">{clinic?.name || 'Mi Clínica'}</span>
+             </div>
           </div>
         </header>
 
@@ -1108,16 +1163,16 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                     <div className="flex gap-2">
                       <button 
                         onClick={() => {
-                          if (clinic?.plan !== 'PREMIUM') {
+                          if (currentPlan !== 'PREMIUM') {
                             setShowUpgradeModal(true);
                           } else {
                             handleSendReminders();
                           }
                         }}
                         disabled={isSendingReminders || appointments.filter(a => a.date === selectedDate && a.status !== 'CANCELLED').length === 0}
-                        className={`group relative text-xs py-1.5 px-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[90px] ${clinic?.plan !== 'PREMIUM' ? 'bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-800' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                        className={`group relative text-xs py-1.5 px-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[90px] ${currentPlan !== 'PREMIUM' ? 'bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-800' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
                       >
-                        {clinic?.plan !== 'PREMIUM' ? (
+                        {currentPlan !== 'PREMIUM' ? (
                            <>
                              <span className="flex items-center gap-1 group-hover:hidden">
                                <MessageCircle className="w-3.5 h-3.5" />
