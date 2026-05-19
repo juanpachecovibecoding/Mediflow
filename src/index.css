@@ -1,23 +1,2 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
-
-@theme {
-  --animate-fluctuate: fluctuate 3s linear infinite;
-  --animate-fluctuate-icon: fluctuate-icon 3s linear infinite;
-
-  @keyframes fluctuate {
-    0% { border-color: #f59e0b; box-shadow: 0 0 15px rgba(245, 158, 11, 0.5); }
-    25% { border-color: #ec4899; box-shadow: 0 0 15px rgba(236, 72, 153, 0.5); }
-    50% { border-color: #8b5cf6; box-shadow: 0 0 15px rgba(139, 92, 246, 0.5); }
-    75% { border-color: #3b82f6; box-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
-    100% { border-color: #f59e0b; box-shadow: 0 0 15px rgba(245, 158, 11, 0.5); }
-  }
-
-  @keyframes fluctuate-icon {
-    0% { color: #f59e0b; transform: scale(1) rotate(0deg); }
-    25% { color: #ec4899; transform: scale(1.2) rotate(10deg); }
-    50% { color: #8b5cf6; transform: scale(1) rotate(0deg); }
-    75% { color: #3b82f6; transform: scale(1.2) rotate(-10deg); }
-    100% { color: #f59e0b; transform: scale(1) rotate(0deg); }
-  }
-}

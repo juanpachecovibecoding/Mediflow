@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { User, signOut } from 'firebase/auth';
 import { doc, onSnapshot, updateDoc, deleteDoc, serverTimestamp, collection, addDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { LogOut, QrCode, MessageCircle, Settings, Calendar, User as UserIcon, Bot, ArrowRight, ShieldCheck, CreditCard, Lock, Menu, X, HelpCircle, Send, Phone, PhoneOff, Mic, Sparkles } from 'lucide-react';
+import { LogOut, QrCode, MessageCircle, Settings, Calendar, User as UserIcon, Bot, ArrowRight, ShieldCheck, CreditCard, Lock, Menu, X, HelpCircle, Send, Phone, PhoneOff, Mic } from 'lucide-react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import Markdown from 'react-markdown';
 import { LATAM_COUNTRIES } from '../constants';
@@ -175,7 +175,7 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
   const [savingSettings, setSavingSettings] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: '', specialty: '', whatsappNumber: '', contactEmail: '', logoUrl: '', coverUrl: '', colorPalette: 'blue' });
+  const [profileForm, setProfileForm] = useState({ name: '', specialty: '', whatsappNumber: '', contactEmail: '', logoUrl: '' });
 
   // Sync Patients
   useEffect(() => {
@@ -689,9 +689,8 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
           if (data.messagesUsed != null && clinic && data.messagesUsed > (clinic.messagesUsed || 0)) {
              let updates: any = { messagesUsed: data.messagesUsed, updatedAt: serverTimestamp() };
              // If limit reached, automatically deactivate bot
-             const trialActive = clinic.trialEndsAt && clinic.trialEndsAt > Date.now();
-             const currentPlanObj = trialActive ? 'PREMIUM' : (clinic.plan || 'GRATIS');
-             const planLimit = systemLimits[currentPlanObj as keyof typeof systemLimits] || 0;
+             const currentPlan = clinic.plan || 'GRATIS';
+             const planLimit = systemLimits[currentPlan as keyof typeof systemLimits] || 0;
              if (data.messagesUsed >= planLimit && clinic.botActive) {
                 updates.botActive = false;
              }
@@ -812,54 +811,6 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
     setSavingSettings(false);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'cover') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        // Max dimensions
-        const MAX_WIDTH = type === 'logo' ? 256 : 800;
-        const MAX_HEIGHT = type === 'logo' ? 256 : 400;
-
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        ctx.drawImage(img, 0, 0, width, height);
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        
-        if (type === 'logo') {
-          setProfileForm(prev => ({ ...prev, logoUrl: dataUrl }));
-        } else {
-          setProfileForm(prev => ({ ...prev, coverUrl: dataUrl }));
-        }
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clinic) return;
@@ -870,8 +821,6 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
         whatsappNumber: profileForm.whatsappNumber,
         contactEmail: profileForm.contactEmail,
         logoUrl: profileForm.logoUrl,
-        coverUrl: profileForm.coverUrl,
-        colorPalette: profileForm.colorPalette,
         updatedAt: serverTimestamp()
       });
       setIsEditingProfile(false);
@@ -922,44 +871,10 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
     }
   };
 
-  const hasHadTrial = !!clinic?.trialEndsAt;
-  const isTrialActive = hasHadTrial && clinic.trialEndsAt > Date.now();
-  const currentPlan = isTrialActive ? 'PREMIUM' : (clinic?.plan || 'GRATIS');
+  const currentPlan = clinic?.plan || 'GRATIS';
   const planLimit = systemLimits[currentPlan as keyof typeof systemLimits] || 0;
   const messagesUsed = clinic?.messagesUsed || 0;
   const isLimitReached = messagesUsed >= planLimit;
-
-  const [trialTimeLeft, setTrialTimeLeft] = useState({ days: 0, hours: 0 });
-
-  useEffect(() => {
-    if (!clinic?.trialEndsAt) return;
-    const calculateTime = () => {
-       const diff = clinic.trialEndsAt - Date.now();
-       if (diff > 0) {
-          setTrialTimeLeft({
-             days: Math.floor(diff / (1000 * 60 * 60 * 24)),
-             hours: Math.floor((diff / (1000 * 60 * 60)) % 24)
-          });
-       } else {
-          setTrialTimeLeft({ days: 0, hours: 0 });
-       }
-    };
-    calculateTime();
-    const interval = setInterval(calculateTime, 1000 * 60);
-    return () => clearInterval(interval);
-  }, [clinic?.trialEndsAt]);
-
-  const handleStartTrial = async () => {
-     try {
-        const trialEndsAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
-        await updateDoc(doc(db, 'clinics', user.uid), {
-           trialEndsAt,
-           updatedAt: serverTimestamp()
-        });
-     } catch (e) {
-        console.error("Error starting trial:", e);
-     }
-  };
 
   const handleSimulatorSend = async () => {
     if (!simulatorInput.trim() || isSimulatorGenerating) return;
@@ -1120,31 +1035,11 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                </h2>
              </div>
           </div>
-          <div className="flex items-center gap-3">
-             {!hasHadTrial && clinic?.plan !== 'PREMIUM' && (
-                <button
-                  onClick={handleStartTrial}
-                  className="animate-fluctuate bg-[#EFF8FD] hover:bg-sky-50 text-sky-900 font-black py-2 px-4 rounded-full text-xs md:text-sm border-2 transition-all flex items-center gap-2"
-                >
-                   <Sparkles className="w-4 h-4 text-[#EBA313]" />
-                   <span>Pásate a Premium <span className="hidden sm:inline">7 días gratis</span></span>
-                </button>
-             )}
-             {isTrialActive && clinic?.plan !== 'PREMIUM' && (
-                <button
-                  onClick={() => setShowUpgradeModal(true)}
-                  className="animate-fluctuate bg-[#EFF8FD] hover:bg-sky-50 text-sky-900 font-black py-2 px-4 rounded-full text-xs md:text-sm border-2 transition-all flex items-center gap-2"
-                >
-                   <Sparkles className="w-4 h-4 text-[#EBA313]" />
-                   <span>Hazte Premium <span className="hidden sm:inline font-normal">({trialTimeLeft.days}d {trialTimeLeft.hours}h)</span></span>
-                </button>
-             )}
-             <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
-               <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
-                   {clinic?.name?.charAt(0) || user.email?.charAt(0) || 'U'}
-               </div>
-               <span className="text-sm font-bold text-slate-700 hidden md:block">{clinic?.name || 'Mi Clínica'}</span>
-             </div>
+          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
+                {clinic?.name?.charAt(0) || user.email?.charAt(0) || 'U'}
+            </div>
+            <span className="text-sm font-bold text-slate-700 hidden md:block">{clinic?.name || 'Mi Clínica'}</span>
           </div>
         </header>
 
@@ -1213,16 +1108,16 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                     <div className="flex gap-2">
                       <button 
                         onClick={() => {
-                          if (currentPlan !== 'PREMIUM') {
+                          if (clinic?.plan !== 'PREMIUM') {
                             setShowUpgradeModal(true);
                           } else {
                             handleSendReminders();
                           }
                         }}
                         disabled={isSendingReminders || appointments.filter(a => a.date === selectedDate && a.status !== 'CANCELLED').length === 0}
-                        className={`group relative text-xs py-1.5 px-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[90px] ${currentPlan !== 'PREMIUM' ? 'bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-800' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                        className={`group relative text-xs py-1.5 px-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[90px] ${clinic?.plan !== 'PREMIUM' ? 'bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-800' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
                       >
-                        {currentPlan !== 'PREMIUM' ? (
+                        {clinic?.plan !== 'PREMIUM' ? (
                            <>
                              <span className="flex items-center gap-1 group-hover:hidden">
                                <MessageCircle className="w-3.5 h-3.5" />
@@ -1892,9 +1787,7 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                               specialty: clinic?.specialty || '',
                               whatsappNumber: clinic?.whatsappNumber || '',
                               contactEmail: clinic?.contactEmail || user.email || '',
-                              logoUrl: clinic?.logoUrl || '',
-                              coverUrl: clinic?.coverUrl || '',
-                              colorPalette: clinic?.colorPalette || 'blue'
+                              logoUrl: clinic?.logoUrl || ''
                             });
                             setIsEditingProfile(true);
                           }
@@ -1940,46 +1833,9 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                         <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Número de WhatsApp</label>
                         <input type="text" value={profileForm.whatsappNumber} onChange={e => setProfileForm({...profileForm, whatsappNumber: e.target.value})} className="w-full px-4 py-2 border rounded-xl bg-slate-50 focus:bg-white" />
                       </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                           <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Logo</label>
-                           <div className="flex items-center gap-4">
-                              {profileForm.logoUrl && <img src={profileForm.logoUrl} alt="Logo" className="w-12 h-12 rounded-full object-cover shadow-sm bg-slate-50" />}
-                              <label className="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
-                                 Subir
-                                 <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'logo')} className="hidden" />
-                              </label>
-                           </div>
-                        </div>
-                        <div>
-                           <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Portada</label>
-                           <div className="flex items-center gap-4">
-                              {profileForm.coverUrl && <img src={profileForm.coverUrl} alt="Cover" className="h-12 w-20 rounded object-cover shadow-sm bg-slate-50" />}
-                              <label className="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
-                                 Subir
-                                 <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'cover')} className="hidden" />
-                              </label>
-                           </div>
-                        </div>
-                      </div>
-
                       <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 mt-4">Paleta de Colores (Agenda Pública)</label>
-                        <div className="grid grid-cols-3 gap-3">
-                           <button type="button" onClick={() => setProfileForm({...profileForm, colorPalette: 'blue'})} className={`p-3 rounded-xl border-2 flex flex-col md:flex-row items-center justify-between transition-all gap-2 ${profileForm.colorPalette === 'blue' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
-                              <span className="text-sm font-bold text-slate-700">Océano</span>
-                              <div className="flex gap-1"><div className="w-4 h-4 rounded-full bg-sky-500"></div><div className="w-4 h-4 rounded-full bg-sky-900"></div></div>
-                           </button>
-                           <button type="button" onClick={() => setProfileForm({...profileForm, colorPalette: 'green'})} className={`p-3 rounded-xl border-2 flex flex-col md:flex-row items-center justify-between transition-all gap-2 ${profileForm.colorPalette === 'green' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
-                              <span className="text-sm font-bold text-slate-700">Naturaleza</span>
-                              <div className="flex gap-1"><div className="w-4 h-4 rounded-full bg-emerald-500"></div><div className="w-4 h-4 rounded-full bg-emerald-900"></div></div>
-                           </button>
-                           <button type="button" onClick={() => setProfileForm({...profileForm, colorPalette: 'rose'})} className={`p-3 rounded-xl border-2 flex flex-col md:flex-row items-center justify-between transition-all gap-2 ${profileForm.colorPalette === 'rose' ? 'border-rose-500 bg-rose-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
-                              <span className="text-sm font-bold text-slate-700">Elegancia</span>
-                              <div className="flex gap-1"><div className="w-4 h-4 rounded-full bg-rose-500"></div><div className="w-4 h-4 rounded-full bg-rose-900"></div></div>
-                           </button>
-                        </div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">URL de Imagen de Perfil (Logo)</label>
+                        <input type="url" value={profileForm.logoUrl} onChange={e => setProfileForm({...profileForm, logoUrl: e.target.value})} placeholder="https://ejemplo.com/logo.png" className="w-full px-4 py-2 border rounded-xl bg-slate-50 focus:bg-white" />
                       </div>
                       <div className="flex gap-3 justify-end pt-4">
                         <button type="button" onClick={() => setIsEditingProfile(false)} className="px-5 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors">Cancelar</button>
@@ -2010,26 +1866,6 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                             <img src={clinic.logoUrl} alt="Logo" className="w-16 h-16 rounded-xl object-cover border border-slate-200" />
                          </div>
                        )}
-                       {clinic?.coverUrl && (
-                         <div>
-                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-2">Portada</p>
-                            <img src={clinic.coverUrl} alt="Cover" className="h-20 w-40 rounded-xl object-cover border border-slate-200" />
-                         </div>
-                       )}
-                       <div>
-                         <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-2">Paleta de Colores</p>
-                         <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full" style={{ backgroundColor: clinic?.colorPalette === 'green' ? '#10b981' : clinic?.colorPalette === 'rose' ? '#f43f5e' : '#0ea5e9' }}></div>
-                            <span className="text-sm font-medium text-slate-600 capitalize">{clinic?.colorPalette === 'green' ? 'Naturaleza' : clinic?.colorPalette === 'rose' ? 'Elegancia' : 'Océano'}</span>
-                         </div>
-                       </div>
-                       
-                       <div className="pt-6 border-t border-slate-100">
-                          <a href={`/reservar/${user.uid}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold rounded-xl transition-colors">
-                             <Calendar className="w-5 h-5" />
-                             Ver mi Agenda Pública
-                          </a>
-                       </div>
                     </div>
                   )}
                </div>
