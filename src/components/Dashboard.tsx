@@ -175,7 +175,7 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
   const [savingSettings, setSavingSettings] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: '', specialty: '', whatsappNumber: '', contactEmail: '', logoUrl: '' });
+  const [profileForm, setProfileForm] = useState({ name: '', specialty: '', whatsappNumber: '', contactEmail: '', logoUrl: '', coverUrl: '', colorPalette: 'blue' });
 
   // Sync Patients
   useEffect(() => {
@@ -812,6 +812,54 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
     setSavingSettings(false);
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'cover') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Max dimensions
+        const MAX_WIDTH = type === 'logo' ? 256 : 800;
+        const MAX_HEIGHT = type === 'logo' ? 256 : 400;
+
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        
+        if (type === 'logo') {
+          setProfileForm(prev => ({ ...prev, logoUrl: dataUrl }));
+        } else {
+          setProfileForm(prev => ({ ...prev, coverUrl: dataUrl }));
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clinic) return;
@@ -822,6 +870,8 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
         whatsappNumber: profileForm.whatsappNumber,
         contactEmail: profileForm.contactEmail,
         logoUrl: profileForm.logoUrl,
+        coverUrl: profileForm.coverUrl,
+        colorPalette: profileForm.colorPalette,
         updatedAt: serverTimestamp()
       });
       setIsEditingProfile(false);
@@ -1842,7 +1892,9 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                               specialty: clinic?.specialty || '',
                               whatsappNumber: clinic?.whatsappNumber || '',
                               contactEmail: clinic?.contactEmail || user.email || '',
-                              logoUrl: clinic?.logoUrl || ''
+                              logoUrl: clinic?.logoUrl || '',
+                              coverUrl: clinic?.coverUrl || '',
+                              colorPalette: clinic?.colorPalette || 'blue'
                             });
                             setIsEditingProfile(true);
                           }
@@ -1888,9 +1940,46 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                         <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Número de WhatsApp</label>
                         <input type="text" value={profileForm.whatsappNumber} onChange={e => setProfileForm({...profileForm, whatsappNumber: e.target.value})} className="w-full px-4 py-2 border rounded-xl bg-slate-50 focus:bg-white" />
                       </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                           <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Logo</label>
+                           <div className="flex items-center gap-4">
+                              {profileForm.logoUrl && <img src={profileForm.logoUrl} alt="Logo" className="w-12 h-12 rounded-full object-cover shadow-sm bg-slate-50" />}
+                              <label className="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
+                                 Subir
+                                 <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'logo')} className="hidden" />
+                              </label>
+                           </div>
+                        </div>
+                        <div>
+                           <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Portada</label>
+                           <div className="flex items-center gap-4">
+                              {profileForm.coverUrl && <img src={profileForm.coverUrl} alt="Cover" className="h-12 w-20 rounded object-cover shadow-sm bg-slate-50" />}
+                              <label className="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
+                                 Subir
+                                 <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'cover')} className="hidden" />
+                              </label>
+                           </div>
+                        </div>
+                      </div>
+
                       <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">URL de Imagen de Perfil (Logo)</label>
-                        <input type="url" value={profileForm.logoUrl} onChange={e => setProfileForm({...profileForm, logoUrl: e.target.value})} placeholder="https://ejemplo.com/logo.png" className="w-full px-4 py-2 border rounded-xl bg-slate-50 focus:bg-white" />
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 mt-4">Paleta de Colores (Agenda Pública)</label>
+                        <div className="grid grid-cols-3 gap-3">
+                           <button type="button" onClick={() => setProfileForm({...profileForm, colorPalette: 'blue'})} className={`p-3 rounded-xl border-2 flex flex-col md:flex-row items-center justify-between transition-all gap-2 ${profileForm.colorPalette === 'blue' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
+                              <span className="text-sm font-bold text-slate-700">Océano</span>
+                              <div className="flex gap-1"><div className="w-4 h-4 rounded-full bg-sky-500"></div><div className="w-4 h-4 rounded-full bg-sky-900"></div></div>
+                           </button>
+                           <button type="button" onClick={() => setProfileForm({...profileForm, colorPalette: 'green'})} className={`p-3 rounded-xl border-2 flex flex-col md:flex-row items-center justify-between transition-all gap-2 ${profileForm.colorPalette === 'green' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
+                              <span className="text-sm font-bold text-slate-700">Naturaleza</span>
+                              <div className="flex gap-1"><div className="w-4 h-4 rounded-full bg-emerald-500"></div><div className="w-4 h-4 rounded-full bg-emerald-900"></div></div>
+                           </button>
+                           <button type="button" onClick={() => setProfileForm({...profileForm, colorPalette: 'rose'})} className={`p-3 rounded-xl border-2 flex flex-col md:flex-row items-center justify-between transition-all gap-2 ${profileForm.colorPalette === 'rose' ? 'border-rose-500 bg-rose-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
+                              <span className="text-sm font-bold text-slate-700">Elegancia</span>
+                              <div className="flex gap-1"><div className="w-4 h-4 rounded-full bg-rose-500"></div><div className="w-4 h-4 rounded-full bg-rose-900"></div></div>
+                           </button>
+                        </div>
                       </div>
                       <div className="flex gap-3 justify-end pt-4">
                         <button type="button" onClick={() => setIsEditingProfile(false)} className="px-5 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors">Cancelar</button>
@@ -1921,6 +2010,26 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                             <img src={clinic.logoUrl} alt="Logo" className="w-16 h-16 rounded-xl object-cover border border-slate-200" />
                          </div>
                        )}
+                       {clinic?.coverUrl && (
+                         <div>
+                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-2">Portada</p>
+                            <img src={clinic.coverUrl} alt="Cover" className="h-20 w-40 rounded-xl object-cover border border-slate-200" />
+                         </div>
+                       )}
+                       <div>
+                         <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-2">Paleta de Colores</p>
+                         <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full" style={{ backgroundColor: clinic?.colorPalette === 'green' ? '#10b981' : clinic?.colorPalette === 'rose' ? '#f43f5e' : '#0ea5e9' }}></div>
+                            <span className="text-sm font-medium text-slate-600 capitalize">{clinic?.colorPalette === 'green' ? 'Naturaleza' : clinic?.colorPalette === 'rose' ? 'Elegancia' : 'Océano'}</span>
+                         </div>
+                       </div>
+                       
+                       <div className="pt-6 border-t border-slate-100">
+                          <a href={`/reservar/${user.uid}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold rounded-xl transition-colors">
+                             <Calendar className="w-5 h-5" />
+                             Ver mi Agenda Pública
+                          </a>
+                       </div>
                     </div>
                   )}
                </div>

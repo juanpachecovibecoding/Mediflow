@@ -196,29 +196,59 @@ export default function BookingPortal() {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Activity className="animate-spin text-sky-600 w-8 h-8" /></div>;
   }
 
-  if (!clinic) {
+  const getColors = (palette: string) => {
+    switch(palette) {
+      case 'green': return { themeClasses: 'selection:bg-emerald-100', textMain: 'text-emerald-600', textLight: 'text-emerald-700', bgMain: 'bg-emerald-600', bgLight: 'bg-emerald-50', bgLight2: 'bg-emerald-100', bgBar: 'bg-emerald-500', borderMain: 'border-emerald-500', borderLight: 'border-emerald-100', focusRing: 'focus:ring-emerald-500', shadow: 'shadow-emerald-200' };
+      case 'rose': return { themeClasses: 'selection:bg-rose-100', textMain: 'text-rose-600', textLight: 'text-rose-700', bgMain: 'bg-rose-600', bgLight: 'bg-rose-50', bgLight2: 'bg-rose-100', bgBar: 'bg-rose-500', borderMain: 'border-rose-500', borderLight: 'border-rose-100', focusRing: 'focus:ring-rose-500', shadow: 'shadow-rose-200' };
+      default: return { themeClasses: 'selection:bg-sky-100', textMain: 'text-sky-600', textLight: 'text-sky-700', bgMain: 'bg-sky-600', bgLight: 'bg-sky-50', bgLight2: 'bg-sky-100', bgBar: 'bg-sky-500', borderMain: 'border-sky-500', borderLight: 'border-sky-100', focusRing: 'focus:ring-sky-500', shadow: 'shadow-sky-200' };
+    }
+  };
+
+  if(!clinic) {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50">Clínica no encontrada</div>;
   }
 
+  const colors = getColors(clinic.colorPalette || 'blue');
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 md:p-8 selection:bg-sky-100">
-      <div className="max-w-xl mx-auto">
-        <header className="text-center mb-10">
-           <div className="w-16 h-16 bg-sky-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-lg mx-auto mb-4 overflow-hidden">
-              {clinic.logoUrl ? (
-                <img src={clinic.logoUrl} alt={clinic.name} className="w-full h-full object-cover" />
-              ) : (
-                clinic.name?.charAt(0)
-              )}
+    <div className={`min-h-screen bg-slate-50 font-sans text-slate-800 pb-8 ${colors.themeClasses}`}>
+      {clinic.coverUrl ? (
+        <div className="w-full h-48 md:h-64 mb-16 relative">
+           <img src={clinic.coverUrl} alt="Cover" className="w-full h-full object-cover" />
+           <div className="absolute inset-x-0 bottom-0 max-w-xl mx-auto px-4 md:px-8 translate-y-1/2 flex justify-center">
+              <div className={`w-28 h-28 ${colors.bgMain} rounded-3xl flex items-center justify-center text-white font-bold text-3xl shadow-xl overflow-hidden border-4 border-slate-50`}>
+                {clinic.logoUrl ? (
+                  <img src={clinic.logoUrl} alt={clinic.name} className="w-full h-full object-cover" />
+                ) : (
+                  clinic.name?.charAt(0)
+                )}
+              </div>
            </div>
+        </div>
+      ) : (
+        <div className="pt-12">
+          <header className="text-center mb-10 max-w-xl mx-auto px-4">
+             <div className={`w-20 h-20 ${colors.bgMain} rounded-2xl flex items-center justify-center text-white font-bold text-3xl shadow-lg mx-auto mb-4 overflow-hidden`}>
+                {clinic.logoUrl ? (
+                  <img src={clinic.logoUrl} alt={clinic.name} className="w-full h-full object-cover" />
+                ) : (
+                  clinic.name?.charAt(0)
+                )}
+             </div>
+          </header>
+        </div>
+      )}
+
+      <div className="max-w-xl mx-auto px-4 md:px-8">
+        <div className="text-center mb-10">
            <h1 className="text-2xl font-bold text-slate-900">{clinic.name}</h1>
            <p className="text-slate-500 font-medium">{clinic.specialty}</p>
-        </header>
+        </div>
 
         <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden">
           {/* Progress Bar */}
           <div className="h-1.5 bg-slate-100 flex">
-            <div className={`h-full bg-sky-500 transition-all duration-500 ${step === 'dni' ? 'w-1/4' : step === 'register' ? 'w-1/2' : step === 'slots' ? 'w-3/4' : 'w-full'}`}></div>
+            <div className={`h-full ${colors.bgBar} transition-all duration-500 ${step === 'dni' ? 'w-1/4' : step === 'register' ? 'w-1/2' : step === 'slots' ? 'w-3/4' : 'w-full'}`}></div>
           </div>
 
           <div className="p-8">
@@ -235,7 +265,7 @@ export default function BookingPortal() {
                       value={dni}
                       onChange={e => setDni(e.target.value)}
                       placeholder="Ingrese su DNI sin puntos"
-                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium text-lg"
+                      className={`w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium text-lg`}
                     />
                   </div>
                   {error && <p className="text-sm text-red-500 font-medium">{error}</p>}
@@ -253,7 +283,7 @@ export default function BookingPortal() {
 
             {step === 'has_appointment' && (
               <div className="animate-fade-in text-center py-4">
-                 <div className="w-16 h-16 bg-sky-50 text-sky-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                 <div className={`w-16 h-16 ${colors.bgLight} ${colors.textMain} rounded-full flex items-center justify-center mx-auto mb-6`}>
                     <CalendarIcon className="w-8 h-8" />
                  </div>
                  <h2 className="text-2xl font-extrabold text-slate-900 mb-2">Ya tienes un turno</h2>
@@ -302,7 +332,7 @@ export default function BookingPortal() {
                       value={formData.name}
                       onChange={e => setFormData({...formData, name: e.target.value})}
                       placeholder="Ej. Juan Pérez"
-                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                      className={`w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium`}
                     />
                   </div>
                   <div>
@@ -311,7 +341,7 @@ export default function BookingPortal() {
                       <select 
                         value={formData.phonePrefix}
                         onChange={e => setFormData({...formData, phonePrefix: e.target.value})}
-                        className="w-1/3 px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-700"
+                        className={`w-1/3 px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium text-slate-700`}
                       >
                         {LATAM_COUNTRIES.map(country => (
                           <option key={country.name} value={country.code}>
@@ -324,7 +354,7 @@ export default function BookingPortal() {
                         value={formData.phone}
                         onChange={e => setFormData({...formData, phone: e.target.value})}
                         placeholder="Ej. 9 341 0000000"
-                        className="w-2/3 flex-1 px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                        className={`w-2/3 flex-1 px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium`}
                       />
                     </div>
                   </div>
@@ -335,7 +365,7 @@ export default function BookingPortal() {
                       value={formData.email}
                       onChange={e => setFormData({...formData, email: e.target.value})}
                       placeholder="ejemplo@correo.com"
-                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                      className={`w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium`}
                     />
                   </div>
                   <div>
@@ -345,7 +375,7 @@ export default function BookingPortal() {
                       value={formData.healthInsurance}
                       onChange={e => setFormData({...formData, healthInsurance: e.target.value})}
                       placeholder="Ej. OSDE"
-                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                      className={`w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium`}
                     />
                   </div>
                   <div>
@@ -355,7 +385,7 @@ export default function BookingPortal() {
                       value={formData.address}
                       onChange={e => setFormData({...formData, address: e.target.value})}
                       placeholder="Ej. Calle 123"
-                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                      className={`w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 ${colors.focusRing} font-medium`}
                     />
                   </div>
                   <button 
@@ -372,12 +402,12 @@ export default function BookingPortal() {
 
             {step === 'slots' && (
               <div className="animate-fade-in">
-                <div className="flex items-center gap-3 mb-6 bg-sky-50 p-4 rounded-2xl border border-sky-100">
-                   <div className="w-10 h-10 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+                <div className={`flex items-center gap-3 mb-6 ${colors.bgLight} p-4 rounded-2xl border ${colors.borderLight}`}>
+                   <div className={`w-10 h-10 rounded-full ${colors.bgLight2} ${colors.textLight} flex items-center justify-center font-bold`}>
                       {patient?.name?.charAt(0)}
                    </div>
                    <div>
-                      <p className="text-xs text-sky-700 font-bold uppercase tracking-wider">Identificado</p>
+                      <p className={`text-xs ${colors.textLight} font-bold uppercase tracking-wider`}>Identificado</p>
                       <p className="font-bold text-slate-900">{patient?.name}</p>
                    </div>
                 </div>
@@ -427,7 +457,7 @@ export default function BookingPortal() {
                               key={i}
                               onClick={() => !isBlocked && setSelectedDate(dateStr)}
                               disabled={isBlocked}
-                              className={`flex flex-col items-center justify-center w-full aspect-square rounded-xl border transition-all ${isBlocked ? 'bg-slate-50 opacity-50 border-transparent text-slate-400 line-through cursor-not-allowed' : active ? 'bg-sky-600 border-sky-600 text-white font-bold shadow-lg shadow-sky-200' : 'bg-white border-slate-100 text-slate-600 hover:bg-sky-50 font-medium'}`}
+                              className={`flex flex-col items-center justify-center w-full aspect-square rounded-xl border transition-all ${isBlocked ? 'bg-slate-50 opacity-50 border-transparent text-slate-400 line-through cursor-not-allowed' : active ? `${colors.bgMain} ${colors.borderMain} text-white font-bold shadow-lg ${colors.shadow}` : `bg-white border-slate-100 text-slate-600 hover:${colors.bgLight} font-medium`}`}
                             >
                               <span className="text-sm">{i + 1}</span>
                             </button>
@@ -450,7 +480,7 @@ export default function BookingPortal() {
                               key={time}
                               disabled={isOccupied}
                               onClick={() => setSelectedTime(time)}
-                              className={`py-3 rounded-xl border text-sm font-semibold transition-all ${isOccupied ? 'bg-slate-100 border-transparent text-slate-300 cursor-not-allowed line-through' : active ? 'bg-sky-100 border-sky-500 text-sky-700 shadow-inner' : 'bg-white border-slate-100 text-slate-600 hover:bg-sky-50'}`}
+                              className={`py-3 rounded-xl border text-sm font-semibold transition-all ${isOccupied ? 'bg-slate-100 border-transparent text-slate-300 cursor-not-allowed line-through' : active ? `${colors.bgLight2} ${colors.borderMain} ${colors.textLight} shadow-inner` : `bg-white border-slate-100 text-slate-600 hover:${colors.bgLight}`}`}
                             >
                               {time}
                             </button>
@@ -510,7 +540,7 @@ export default function BookingPortal() {
 
         <footer className="mt-12 text-center">
            <p className="text-slate-400 text-xs font-medium flex items-center justify-center gap-1">
-              Powered by <span className="text-sky-600 font-bold">MediFlex AI</span> <Activity className="w-3 h-3"/>
+              Powered by <span className={`${colors.textMain} font-bold`}>Turnely AI</span> <Activity className="w-3 h-3"/>
            </p>
         </footer>
       </div>
