@@ -82,16 +82,12 @@ export default function BookingPortal() {
     setLoading(true);
     setError('');
     try {
-      const q = query(collection(db, 'clinics', clinicId, 'patients'), where('dni', '==', dni), where('clinicOwnerId', '==', clinicId), limit(1));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const pData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-        setPatient(pData);
-
-        const apptQ = query(collection(db, 'clinics', clinicId, 'appointments'), where('patientId', '==', pData.id), where('status', '==', 'SCHEDULED'));
-        const apptSnapshot = await getDocs(apptQ);
-        if (!apptSnapshot.empty) {
-          setExistingAppointment({ id: apptSnapshot.docs[0].id, ...apptSnapshot.docs[0].data() });
+      const res = await fetch('/api/public/check-dni', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, dni }) });
+      const data = await res.json();
+      if (data.found) {
+        setPatient(data.patient);
+        if (data.existingAppointment) {
+          setExistingAppointment(data.existingAppointment);
           setStep('has_appointment');
         } else {
           setStep('slots');
@@ -111,18 +107,18 @@ export default function BookingPortal() {
     setRegistering(true);
     try {
       const fullPhone = `${formData.phonePrefix} ${formData.phone.trim()}`;
-      const docRef = await addDoc(collection(db, 'clinics', clinicId, 'patients'), {
+      const patientData = {
         clinicOwnerId: clinicId,
         dni,
         name: formData.name,
         phone: fullPhone,
         email: formData.email,
         address: formData.address,
-        healthInsurance: formData.healthInsurance,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      setPatient({ id: docRef.id, name: formData.name, dni, phone: fullPhone, email: formData.email });
+        healthInsurance: formData.healthInsurance
+      };
+      const res = await fetch('/api/public/register', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, patient: patientData }) });
+      const data = await res.json();
+      setPatient({ id: data.id, ...patientData });
       setStep('slots');
     } catch (err) {
       console.error(err);
@@ -137,10 +133,7 @@ export default function BookingPortal() {
     if (!confirmCancel) return;
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'clinics', clinicId, 'appointments', existingAppointment.id), {
-        status: 'CANCELLED',
-        updatedAt: serverTimestamp()
-      });
+      await fetch('/api/public/cancel', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, appointmentId: existingAppointment.id }) });
       alert("Su turno ha sido cancelado exitosamente.");
       setExistingAppointment(null);
       setDni('');
@@ -155,12 +148,10 @@ export default function BookingPortal() {
 
   useEffect(() => {
     if (selectedDate && clinicId) {
-      const q = query(collection(db, 'clinics', clinicId, 'appointments'), where('date', '==', selectedDate));
-      getDocs(q).then(snapshot => {
-        setOccupiedSlots(snapshot.docs.filter(d => d.data().status !== 'CANCELLED').map(d => d.data().time));
-      }).catch(err => {
-        console.error("Error fetching available appointments: ", err);
-      });
+      fetch('/api/public/slots', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, date: selectedDate }) })
+        .then(r => r.json())
+        .then(data => setOccupiedSlots(data.occupied || []))
+        .catch(console.error);
     }
   }, [selectedDate, clinicId]);
 
@@ -175,16 +166,15 @@ export default function BookingPortal() {
   const confirmReservation = async () => {
     if (!clinicId || !patient || !selectedDate || !selectedTime) return;
     try {
-      await addDoc(collection(db, 'clinics', clinicId, 'appointments'), {
+      const appointment = {
         clinicOwnerId: clinicId,
         patientId: patient.id,
         patientDni: dni,
         date: selectedDate,
         time: selectedTime,
-        status: 'SCHEDULED',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+        status: 'SCHEDULED'
+      };
+      await fetch('/api/public/book', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, appointment }) });
       window.location.href = generateWhatsAppLink();
     } catch (err) {
       console.error(err);

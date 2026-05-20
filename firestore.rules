@@ -92,9 +92,9 @@ service cloud.firestore {
 
       match /patients/{patientId} {
          allow get: if isValidId(patientId);
-         allow list: if (request.auth != null && clinicId == request.auth.uid) || request.query.limit <= 1;
+         allow list: if isSignedIn() && clinicId == request.auth.uid;
          
-         allow create: if (isValidPatient(incoming()) && (request.auth == null || clinicId == request.auth.uid)) &&
+         allow create: if isValidPatient(incoming()) && isSignedIn() && clinicId == request.auth.uid &&
                           isValidId(patientId) &&
                           incoming().createdAt == request.time &&
                           incoming().updatedAt == request.time;
@@ -111,14 +111,14 @@ service cloud.firestore {
 
       match /appointments/{appointmentId} {
          allow get: if isValidId(appointmentId);
-         allow list: if true;
+         allow list: if isSignedIn() && clinicId == request.auth.uid;
          
          allow create: if isValidAppointment(incoming()) && 
                           isValidId(appointmentId) &&
                           incoming().createdAt == request.time &&
                           incoming().updatedAt == request.time;
                           
-         allow update: if (isValidAppointment(incoming()) && (clinicId == request.auth.uid || !isSignedIn())) &&
+         allow update: if isValidAppointment(incoming()) && isSignedIn() && clinicId == request.auth.uid &&
                           incoming().clinicOwnerId == existing().clinicOwnerId &&
                           incoming().patientId == existing().patientId &&
                           incoming().createdAt == existing().createdAt &&

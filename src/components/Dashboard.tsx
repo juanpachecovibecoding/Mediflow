@@ -85,9 +85,10 @@ export default function Dashboard({ user }: { user: User }) {
         return;
       }
 
+      const token = await user.getIdToken();
       const response = await fetch('/api/whatsapp/send-reminders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ clinicId: user.uid, appointments: payloadAppointments })
       });
       const data = await response.json();
@@ -662,9 +663,9 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
   // Sync latest config to the WhatsApp server periodically or on change
   useEffect(() => {
     if (clinic) {
-      fetch('/api/whatsapp/config', {
+      user.getIdToken().then(token => fetch('/api/whatsapp/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           clinicId: user.uid,
           botActive: clinic.botActive,
@@ -673,7 +674,7 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
           plan: clinic.plan,
           messagesUsed: clinic.messagesUsed
         })
-      }).catch(console.error);
+      }).catch(console.error));
     }
   }, [clinic, user.uid]);
 
@@ -681,7 +682,8 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`/api/whatsapp/status/${user.uid}`);
+        const token = await user.getIdToken();
+        const res = await fetch(`/api/whatsapp/status/${user.uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) {
           const data = await res.json();
           setWaStatus(data.status);
@@ -708,9 +710,10 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
   const startWhatsApp = async () => {
     try {
       setWaStatus('INITIALIZING');
+      const token = await user.getIdToken();
       await fetch('/api/whatsapp/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ clinicId: user.uid })
       });
     } catch (err) {
@@ -851,9 +854,13 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
         back_url: `${window.location.origin}/dashboard`
       };
 
+      const token = await user.getIdToken();
       const res = await fetch('/api/mercadopago/create-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(payload)
       });
       const data = await res.json();

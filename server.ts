@@ -10,6 +10,7 @@ import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import { initializeApp, App } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 import { MercadoPagoConfig, Preference, PreApprovalPlan, PreApproval } from 'mercadopago';
 
 // Initialize MP Client (Lazy creation logic inside endpoints where it's used so it doesn't crash without token)
@@ -83,11 +84,12 @@ function getSystemConfig() {
 
 function initializeAI() {
   const cfg = getSystemConfig();
-  if (cfg.apiKey && cfg.projectId && cfg.location) {
+  const apiKey = process.env.GCP_API_KEY || cfg.apiKey;
+  if (apiKey && cfg.projectId && cfg.location) {
     ai = new GoogleGenAI({ 
         // @ts-ignore
         vertexai: { project: cfg.projectId, location: cfg.location },
-        apiKey: cfg.apiKey
+        apiKey: apiKey
     });
     console.log("AI initialized with project:", cfg.projectId);
   } else {
@@ -374,6 +376,10 @@ app.get('/api/admin/system-config', (req, res) => {
 });
 
 app.post('/api/admin/system-config', (req, res) => {
+   const adminKey = req.headers['x-admin-key'];
+   if (adminKey !== process.env.ADMIN_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized' });
+   }
    const { apiKey, projectId, location, limits, prices, voiceAgentPrompt } = req.body;
    const existing = getSystemConfig();
    const newConfig = { ...existing, apiKey, projectId, location, limits: limits || existing.limits, prices: prices || existing.prices, voiceAgentPrompt: voiceAgentPrompt || existing.voiceAgentPrompt };
@@ -388,8 +394,75 @@ app.get('/api/system-limits', (req, res) => {
    res.json({ limits: config.limits, prices: config.prices, voiceAgentPrompt: config.voiceAgentPrompt });
 });
 
+async function verifyFirebaseToken(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
+  }
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await getAuth(getFirebaseAdmin()).verifyIdToken(token);
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+}
+
+app.post('/api/public/check-dni', async (req, res) => {
+  const { clinicId, dni } = req.body;
+  const db = getDb();
+  const pSnap = await db.collection('clinics').doc(clinicId).collection('patients').where('dni', '==', dni).where('clinicOwnerId', '==', clinicId).limit(1).get();
+  if (pSnap.empty) return res.json({ found: false });
+  const pData = { id: pSnap.docs[0].id, ...pSnap.docs[0].data() };
+  if(pData.createdAt) pData.createdAt = pData.createdAt.toDate().toISOString();
+  if(pData.updatedAt) pData.updatedAt = pData.updatedAt.toDate().toISOString();
+
+  const aSnap = await db.collection('clinics').doc(clinicId).collection('appointments').where('patientId', '==', pData.id).where('status', '==', 'SCHEDULED').get();
+  let existingAppointment = null;
+  if (!aSnap.empty) {
+    existingAppointment = { id: aSnap.docs[0].id, ...aSnap.docs[0].data() };
+    if(existingAppointment.createdAt) existingAppointment.createdAt = existingAppointment.createdAt.toDate().toISOString();
+    if(existingAppointment.updatedAt) existingAppointment.updatedAt = existingAppointment.updatedAt.toDate().toISOString();
+  }
+  res.json({ found: true, patient: pData, existingAppointment });
+});
+
+app.post('/api/public/register', async (req, res) => {
+  const { clinicId, patient } = req.body;
+  const db = getDb();
+  patient.createdAt = FieldValue.serverTimestamp();
+  patient.updatedAt = FieldValue.serverTimestamp();
+  const docRef = await db.collection('clinics').doc(clinicId).collection('patients').add(patient);
+  res.json({ id: docRef.id });
+});
+
+app.post('/api/public/cancel', async (req, res) => {
+  const { clinicId, appointmentId } = req.body;
+  const db = getDb();
+  await db.collection('clinics').doc(clinicId).collection('appointments').doc(appointmentId).update({ status: 'CANCELLED', updatedAt: FieldValue.serverTimestamp() });
+  res.json({ success: true });
+});
+
+app.post('/api/public/slots', async (req, res) => {
+  const { clinicId, date } = req.body;
+  const db = getDb();
+  const snap = await db.collection('clinics').doc(clinicId).collection('appointments').where('date', '==', date).get();
+  const occupied = snap.docs.filter((d: any) => d.data().status !== 'CANCELLED').map((d: any) => d.data().time);
+  res.json({ occupied });
+});
+
+app.post('/api/public/book', async (req, res) => {
+  const { clinicId, appointment } = req.body;
+  const db = getDb();
+  appointment.createdAt = FieldValue.serverTimestamp();
+  appointment.updatedAt = FieldValue.serverTimestamp();
+  const docRef = await db.collection('clinics').doc(clinicId).collection('appointments').add(appointment);
+  res.json({ id: docRef.id });
+});
+
 // API Routes
-app.post('/api/whatsapp/start', async (req, res) => {
+app.post('/api/whatsapp/start', verifyFirebaseToken, async (req, res) => {
   const { clinicId } = req.body;
   if (!clinicId) return res.status(400).json({ error: 'clinicId is required' });
   const host = req.get('host') || 'localhost:3000';
@@ -402,7 +475,7 @@ app.post('/api/whatsapp/start', async (req, res) => {
   res.json({ status: waStatus.get(clinicId) });
 });
 
-app.post('/api/whatsapp/config', (req, res) => {
+app.post('/api/whatsapp/config', verifyFirebaseToken, (req, res) => {
   const { clinicId, botActive, systemPrompt, name, plan, messagesUsed } = req.body;
   if (!clinicId) return res.status(400).json({ error: 'clinicId is required' });
   
@@ -419,7 +492,7 @@ app.post('/api/whatsapp/config', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/whatsapp/status/:clinicId', (req, res) => {
+app.get('/api/whatsapp/status/:clinicId', verifyFirebaseToken, (req, res) => {
   const { clinicId } = req.params;
   const status = waStatus.get(clinicId) || 'DISCONNECTED';
   const qr = waQRCodes.get(clinicId) || null;
@@ -429,7 +502,7 @@ app.get('/api/whatsapp/status/:clinicId', (req, res) => {
   res.json({ status, qr, messagesUsed });
 });
 
-app.post('/api/whatsapp/send-reminders', async (req, res) => {
+app.post('/api/whatsapp/send-reminders', verifyFirebaseToken, async (req, res) => {
   const { clinicId, appointments } = req.body;
   if (!clinicId || !appointments || !Array.isArray(appointments)) {
     return res.status(400).json({ error: 'Solicitud inválida' });
@@ -479,7 +552,7 @@ app.post('/api/whatsapp/send-reminders', async (req, res) => {
 });
 
 // Mercado Pago Routes
-app.post('/api/mercadopago/create-preference', async (req, res) => {
+app.post('/api/mercadopago/create-preference', verifyFirebaseToken, async (req, res) => {
   try {
     const client = getMPClient();
     if (!client) {
@@ -511,7 +584,7 @@ app.post('/api/mercadopago/create-preference', async (req, res) => {
   }
 });
 
-app.post('/api/mercadopago/create-subscription', async (req, res) => {
+app.post('/api/mercadopago/create-subscription', verifyFirebaseToken, async (req, res) => {
   try {
     const client = getMPClient();
     if (!client) {
@@ -539,6 +612,9 @@ app.post('/api/mercadopago/create-subscription', async (req, res) => {
 });
 
 app.post('/api/mercadopago/webhook', async (req, res) => {
+  if(req.query.secret !== process.env.MERCADOPAGO_WEBHOOK_SECRET && req.headers['x-signature'] === undefined) {
+    return res.status(403).send('Forbidden');
+  }
   try {
     const { action, data, type } = req.body;
     console.log("Mercado Pago Webhook Received:", { action, type, data });
