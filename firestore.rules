@@ -6,7 +6,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    function isAdmin() { return request.auth != null && request.auth.token.email == 'portadordelsello@gmail.com'; }
+    function isAdmin() { return request.auth != null && (request.auth.token.email == 'juanpacheco.vibecoding@gmail.com' || request.auth.token.email == 'portadordelsello@gmail.com'); }
     function isSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
