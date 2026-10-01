@@ -11,19 +11,6 @@ import pino from 'pino';
 import { initializeApp, App } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
-import { MercadoPagoConfig, Preference, PreApprovalPlan, PreApproval } from 'mercadopago';
-
-// Initialize MP Client (Lazy creation logic inside endpoints where it's used so it doesn't crash without token)
-let mpClient: MercadoPagoConfig | null = null;
-function getMPClient() {
-  if (!mpClient) {
-    const token = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    if (token) {
-      mpClient = new MercadoPagoConfig({ accessToken: token });
-    }
-  }
-  return mpClient;
-}
 
 // Initialize Firebase Admin (Lazy)
 const firebaseAppConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
@@ -54,7 +41,7 @@ const configPath = path.join(process.cwd(), 'system-config.json');
 
 function getSystemConfig() {
   const envConfig = {
-    apiKey: process.env.AGENT_PLATFORM_API_KEY || '',
+    apiKey: process.env.GEMINI_API_KEY || process.env.AGENT_PLATFORM_API_KEY || '',
     projectId: process.env.VERTEX_PROJECT_ID || '',
     location: process.env.VERTEX_LOCATION || 'us-central1',
     limits: {
@@ -84,17 +71,20 @@ function getSystemConfig() {
 
 function initializeAI() {
   const cfg = getSystemConfig();
-  const apiKey = process.env.GCP_API_KEY || cfg.apiKey;
-  if (apiKey && cfg.projectId && cfg.location) {
+  const apiKey = process.env.GEMINI_API_KEY || cfg.apiKey || process.env.GCP_API_KEY;
+  if (apiKey) {
     ai = new GoogleGenAI({ 
-        // @ts-ignore
-        vertexai: { project: cfg.projectId, location: cfg.location },
-        apiKey: apiKey
+      apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
     });
-    console.log("AI initialized with project:", cfg.projectId);
+    console.log("AI initialized with Google AI Studio API Key");
   } else {
     ai = null;
-    console.log("AI initialization skipped. Missing configurations.");
+    console.log("AI initialization skipped. Missing GEMINI_API_KEY.");
   }
 }
 
@@ -279,7 +269,7 @@ async function startWhatsAppBot(clinicId: string, host: string) {
           };
 
           const response1 = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents: `Mensaje del paciente: "${textMessage}"`,
             config: generationConfig
           });
@@ -327,7 +317,7 @@ async function startWhatsAppBot(clinicId: string, host: string) {
               const previousContent = response1.candidates?.[0]?.content;
               if (previousContent) {
                 const response2 = await ai.models.generateContent({
-                  model: 'gemini-2.5-flash',
+                  model: 'gemini-3.8-flash',
                   contents: [
                     { role: 'user', parts: [{ text: `Mensaje del paciente: "${textMessage}"` }] },
                     previousContent,
@@ -549,86 +539,6 @@ app.post('/api/whatsapp/send-reminders', verifyFirebaseToken, async (req, res) =
     }
     console.log(`Finished sending ${appointments.length} reminders for ${clinicId}`);
   })();
-});
-
-// Mercado Pago Routes
-app.post('/api/mercadopago/create-preference', verifyFirebaseToken, async (req, res) => {
-  try {
-    const client = getMPClient();
-    if (!client) {
-      return res.status(500).json({ error: 'MERCADOPAGO_ACCESS_TOKEN no configurado' });
-    }
-
-    const { items, clinicId } = req.body;
-    
-    const preference = new Preference(client);
-    const result = await preference.create({
-      body: {
-        items: items,
-        metadata: {
-          clinicId: clinicId
-        },
-        back_urls: {
-          success: `${process.env.APP_URL || 'http://localhost:3000'}/panel/${clinicId}?status=success`,
-          failure: `${process.env.APP_URL || 'http://localhost:3000'}/panel/${clinicId}?status=failure`,
-          pending: `${process.env.APP_URL || 'http://localhost:3000'}/panel/${clinicId}?status=pending`
-        },
-        auto_return: 'approved'
-      }
-    });
-
-    res.json({ id: result.id });
-  } catch (error) {
-    console.error("Error creating preference:", error);
-    res.status(500).json({ error: 'Failed to create preference' });
-  }
-});
-
-app.post('/api/mercadopago/create-subscription', verifyFirebaseToken, async (req, res) => {
-  try {
-    const client = getMPClient();
-    if (!client) {
-      return res.status(500).json({ error: 'MERCADOPAGO_ACCESS_TOKEN no configurado' });
-    }
-
-    const { reason, auto_recurring, back_url, payer_email } = req.body;
-    
-    const preApprovalPlan = new PreApprovalPlan(client);
-    
-    // We create a plan first
-    const planResult = await preApprovalPlan.create({
-      body: {
-        reason: reason,
-        auto_recurring: auto_recurring,
-        back_url: back_url || `${process.env.APP_URL || 'http://localhost:3000'}`
-      }
-    });
-
-    res.json({ init_point: planResult.init_point, plan_id: planResult.id });
-  } catch (error: any) {
-    console.error("Error creating subscription plan:", JSON.stringify(error, null, 2));
-    res.status(500).json({ error: 'Failed to create subscription plan', details: error?.message || error?.response || error });
-  }
-});
-
-app.post('/api/mercadopago/webhook', async (req, res) => {
-  if(req.query.secret !== process.env.MERCADOPAGO_WEBHOOK_SECRET && req.headers['x-signature'] === undefined) {
-    return res.status(403).send('Forbidden');
-  }
-  try {
-    const { action, data, type } = req.body;
-    console.log("Mercado Pago Webhook Received:", { action, type, data });
-    
-    // 1. Verify webhook signature if needed using MERCADOPAGO_WEBHOOK_SECRET
-    // 2. Fetch the subscription or payment from MP SDK using data.id
-    // 3. Update the clinic record in Firestore:
-    // e.g. getDb().collection('clinics').where('subscriptionId', '==', ...).update({ plan: 'PREMIUM' })
-    
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("Webhook Error:", err);
-    res.sendStatus(500);
-  }
 });
 
 async function startServer() {

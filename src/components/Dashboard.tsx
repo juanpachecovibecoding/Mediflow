@@ -141,7 +141,7 @@ export default function Dashboard({ user }: { user: User }) {
       historyMsg.push({ role: 'user', parts: [{ text: userMsg }] });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.8-flash",
         contents: historyMsg,
         config: {
           systemInstruction: `Eres un asistente de soporte experto en Turnely, una aplicación web de gestión para clínicas.
@@ -609,9 +609,9 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
      const pendingPlan = localStorage.getItem('turnely_selected_plan');
      if (pendingPlan && pricesLoaded) {
         localStorage.removeItem('turnely_selected_plan');
-        startCheckout(pendingPlan, systemPrices);
+        changePlan(pendingPlan);
      }
-  }, [pricesLoaded, systemPrices]);
+  }, [pricesLoaded]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -836,43 +836,17 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
     setShowUpgradeModal(true);
   };
 
-  const startCheckout = async (plan: string, overridePrices?: typeof systemPrices) => {
+  const changePlan = async (plan: string) => {
     try {
       setUpgradingPlan(true);
-      
-      const pricesToUse = overridePrices || systemPrices;
-      
-      const payload = {
-        reason: `Suscripción ${plan} - Turnely`,
-        auto_recurring: {
-          frequency: 1,
-          frequency_type: "months",
-          transaction_amount: plan === 'PREMIUM' ? pricesToUse.PREMIUM : pricesToUse.BASICO,
-          currency_id: "ARS"
-        },
-        payer_email: user.email,
-        back_url: `${window.location.origin}/dashboard`
-      };
-
-      const token = await user.getIdToken();
-      const res = await fetch('/api/mercadopago/create-subscription', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
+      await updateDoc(doc(db, 'clinics', user.uid), {
+        plan: plan,
+        updatedAt: serverTimestamp()
       });
-      const data = await res.json();
-      
-      if (data.init_point) {
-        window.location.href = data.init_point;
-      } else {
-        alert("Error al iniciar checkout: " + (data.details || data.error || "Revisa la configuración de Mercado Pago."));
-      }
+      setShowUpgradeModal(false);
     } catch (e: any) {
       console.error(e);
-      alert("Error de conexión: " + e.message);
+      alert("Error al actualizar el plan: " + (e?.message || e));
     } finally {
       setUpgradingPlan(false);
     }
@@ -908,7 +882,7 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
       const defaultPrompt = 'Eres un asistente virtual amable y servicial para responder consultas médicas y agendar pacientes.';
       
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.8-flash',
         contents: historyMsg,
         config: {
           systemInstruction: systemPrompt || clinic?.systemPrompt || defaultPrompt,
@@ -2468,8 +2442,8 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
           <div className="bg-white rounded-3xl md:rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl animate-scale-in max-h-[90vh] flex flex-col">
             <div className="p-6 md:p-8 text-center relative overflow-hidden bg-gradient-to-br from-indigo-500 to-sky-600 border-b border-white/10 shrink-0">
                <div className="relative z-10">
-                 <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">Mejora tu Suscripción</h2>
-                 <p className="text-indigo-100 text-xs md:text-sm">Desbloquea el poder total de Turnely AI con Mercado Pago 🔒 Checkout Pro</p>
+                 <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">Selecciona tu Plan</h2>
+                 <p className="text-indigo-100 text-xs md:text-sm">Aumenta la cuota de mensajes mensuales y turnos para tu clínica</p>
                </div>
             </div>
             
@@ -2485,11 +2459,11 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-sky-500" /> Agenda compartida</li>
                  </ul>
                  <button
-                   onClick={() => startCheckout('BASICO')}
-                   disabled={upgradingPlan}
+                   onClick={() => changePlan('BASICO')}
+                   disabled={upgradingPlan || clinic?.plan === 'BASICO'}
                    className="w-full py-3 px-4 bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold rounded-xl transition-colors mt-auto disabled:opacity-50"
                  >
-                   {upgradingPlan ? 'Procesando...' : 'Obtener Básico'}
+                   {upgradingPlan ? 'Actualizando...' : clinic?.plan === 'BASICO' ? 'Plan Actual' : 'Activar Básico'}
                  </button>
               </div>
 
@@ -2510,11 +2484,11 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Múltiples sucursales</li>
                  </ul>
                  <button
-                   onClick={() => startCheckout('PREMIUM')}
-                   disabled={upgradingPlan}
+                   onClick={() => changePlan('PREMIUM')}
+                   disabled={upgradingPlan || clinic?.plan === 'PREMIUM'}
                    className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-xl transition-colors mt-auto disabled:opacity-50"
                  >
-                   {upgradingPlan ? 'Procesando...' : 'Obtener Premium'}
+                   {upgradingPlan ? 'Actualizando...' : clinic?.plan === 'PREMIUM' ? 'Plan Actual' : 'Activar Premium'}
                  </button>
               </div>
             </div>
