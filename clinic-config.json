@@ -1,0 +1,72 @@
+{
+  "clinicId": "consultorio-dental",
+  "clinicName": "Consultorio Odontológico Dr. Juan Pérez",
+  "doctorName": "Dr. Juan Pérez",
+  "specialty": "Odontología Integral, Ortodoncia e Implantes",
+  "shortDescription": "Atención odontológica personalizada de excelencia con tecnología de última generación.",
+  "phone": "+54 9 11 1234-5678",
+  "whatsappNumber": "+5491112345678",
+  "address": "Av. Corrientes 1234, Piso 3, Of. A",
+  "city": "CABA, Buenos Aires",
+  "googleMapsUrl": "https://maps.google.com/?q=Av.+Corrientes+1234+Buenos+Aires",
+  "workingHours": "Lunes a Viernes de 09:00 a 19:00 hs | Sábados de 09:00 a 13:00 hs",
+  "slotDurationMinutes": 30,
+  "branding": {
+    "primaryColor": "#0284c7",
+    "accentColor": "#0ea5e9",
+    "logoText": "Dr. Pérez",
+    "logoBadge": "Odontología"
+  },
+  "services": [
+    {
+      "id": "limpieza",
+      "name": "Limpieza y Profilaxis Dental",
+      "description": "Limpieza profunda con ultrasonido para eliminar sarro, placa bacteriana y manchas superficiales.",
+      "duration": "30 min",
+      "price": "Consultar"
+    },
+    {
+      "id": "ortodoncia",
+      "name": "Ortodoncia Invisible y Brackets",
+      "description": "Alineación y corrección dental estética con alineadores invisibles o brackets de autoligado.",
+      "duration": "45 min",
+      "price": "Consultar"
+    },
+    {
+      "id": "blanqueamiento",
+      "name": "Blanqueamiento Dental Láser",
+      "description": "Aclarado de hasta 4 tonos en una sola sesión, seguro para el esmalte y sin dolor.",
+      "duration": "45 min",
+      "price": "Consultar"
+    },
+    {
+      "id": "implantes",
+      "name": "Implantes Dentales y Prótesis",
+      "description": "Rehabilitación oral con implantes de titanio de alta gama y coronas de zirconio.",
+      "duration": "60 min",
+      "price": "Consultar"
+    },
+    {
+      "id": "odontopediatria",
+      "name": "Odontopediatría",
+      "description": "Cuidado bucal especializado y amigable para niños en un entorno relajado y sin miedo.",
+      "duration": "30 min",
+      "price": "Consultar"
+    },
+    {
+      "id": "urgencias",
+      "name": "Urgencias y Alivio del Dolor",
+      "description": "Atención rápida para dolor agudo, piezas rotas o inflamación con prioridad.",
+      "duration": "30 min",
+      "price": "Consultar"
+    }
+  ],
+  "insurances": [
+    "Particular",
+    "OSDE",
+    "Swiss Medical",
+    "Galeno",
+    "Medifé",
+    "OMINT"
+  ]
+}

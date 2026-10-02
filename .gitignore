@@ -7,5 +7,6 @@ coverage/
 .env*
 !.env.example
 wa_clients/
+wa_auth/
 system-config.json
 wa_logs.txt

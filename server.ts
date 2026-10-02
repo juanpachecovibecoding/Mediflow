@@ -12,17 +12,121 @@ import { initializeApp, App } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 
-// Initialize Firebase Admin (Lazy)
-const firebaseAppConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+// -------------------------------------------------------------
+// 1. Configuraciones Maestras (Clinic & System)
+// -------------------------------------------------------------
+const clinicConfigPath = path.join(process.cwd(), 'clinic-config.json');
+const systemConfigPath = path.join(process.cwd(), 'system-config.json');
 
+export interface ClinicConfig {
+  clinicId: string;
+  clinicName: string;
+  doctorName: string;
+  specialty: string;
+  shortDescription: string;
+  phone: string;
+  whatsappNumber: string;
+  address: string;
+  city: string;
+  googleMapsUrl: string;
+  workingHours: string;
+  slotDurationMinutes: number;
+  branding: {
+    primaryColor: string;
+    accentColor: string;
+    logoText: string;
+    logoBadge: string;
+  };
+  services: Array<{
+    id: string;
+    name: string;
+    description: string;
+    duration: string;
+    price: string;
+  }>;
+  insurances: string[];
+}
+
+export interface SystemConfig {
+  apiKey: string;
+  model: string;
+  adminSecret: string;
+  systemPrompt: string;
+}
+
+function getClinicConfig(): ClinicConfig {
+  if (fs.existsSync(clinicConfigPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(clinicConfigPath, 'utf8'));
+    } catch (e) {
+      console.error('Error reading clinic config:', e);
+    }
+  }
+  return {
+    clinicId: 'consultorio-dental',
+    clinicName: 'Consultorio Odontológico',
+    doctorName: 'Dr. Odontólogo',
+    specialty: 'Odontología Integral',
+    shortDescription: 'Atención odontológica personalizada.',
+    phone: '+54 9 11 0000-0000',
+    whatsappNumber: '+5491100000000',
+    address: 'Consultorio Central',
+    city: 'Buenos Aires',
+    googleMapsUrl: '',
+    workingHours: 'Lunes a Viernes de 09:00 a 19:00 hs',
+    slotDurationMinutes: 30,
+    branding: {
+      primaryColor: '#0284c7',
+      accentColor: '#0ea5e9',
+      logoText: 'Consultorio',
+      logoBadge: 'Dental'
+    },
+    services: [],
+    insurances: ['Particular']
+  };
+}
+
+function getSystemConfig(): SystemConfig {
+  const envConfig: SystemConfig = {
+    apiKey: process.env.GEMINI_API_KEY || process.env.GCP_API_KEY || process.env.AGENT_PLATFORM_API_KEY || '',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    adminSecret: process.env.SUPERADMIN_SECRET || 'superadmin123',
+    systemPrompt: 'Eres la asistente virtual del consultorio odontológico. Responde con calidez y profesionalismo en español. Cuando el paciente quiera agendar o consultar un turno, dale este enlace directo: {bookingUrl}'
+  };
+
+  if (fs.existsSync(systemConfigPath)) {
+    try {
+      const savedData = JSON.parse(fs.readFileSync(systemConfigPath, 'utf8'));
+      return {
+        apiKey: savedData.apiKey || envConfig.apiKey,
+        model: savedData.model || envConfig.model,
+        adminSecret: savedData.adminSecret || envConfig.adminSecret,
+        systemPrompt: savedData.systemPrompt || envConfig.systemPrompt
+      };
+    } catch (e) {
+      console.error('Error reading system config:', e);
+    }
+  }
+  return envConfig;
+}
+
+// -------------------------------------------------------------
+// 2. Firebase Admin Inicialización
+// -------------------------------------------------------------
 let adminApp: App | null = null;
 let firestoreDb: any | null = null;
 
 function getFirebaseAdmin() {
   if (!adminApp) {
-    adminApp = initializeApp({
-      projectId: firebaseAppConfig.projectId,
-    });
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const firebaseAppConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      adminApp = initializeApp({
+        projectId: firebaseAppConfig.projectId,
+      });
+    } else {
+      adminApp = initializeApp();
+    }
   }
   return adminApp;
 }
@@ -30,87 +134,64 @@ function getFirebaseAdmin() {
 function getDb() {
   if (!firestoreDb) {
     const app = getFirebaseAdmin();
-    firestoreDb = getFirestore(app, firebaseAppConfig.firestoreDatabaseId);
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    let databaseId = undefined;
+    if (fs.existsSync(configPath)) {
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      databaseId = cfg.firestoreDatabaseId;
+    }
+    firestoreDb = getFirestore(app, databaseId);
   }
   return firestoreDb;
 }
 
-// Agent Platform Configuration
+// -------------------------------------------------------------
+// 3. Google Gemini Inicialización
+// -------------------------------------------------------------
 let ai: GoogleGenAI | null = null;
-const configPath = path.join(process.cwd(), 'system-config.json');
-
-function getSystemConfig() {
-  const envConfig = {
-    apiKey: process.env.GEMINI_API_KEY || process.env.AGENT_PLATFORM_API_KEY || '',
-    projectId: process.env.VERTEX_PROJECT_ID || '',
-    location: process.env.VERTEX_LOCATION || 'us-central1',
-    limits: {
-      GRATIS: 100,
-      BASICO: 500,
-      PREMIUM: 1000
-    },
-    prices: {
-      BASICO: 4999,
-      PREMIUM: 14999
-    },
-    voiceAgentPrompt: 'Eres un experto de soporte técnico de Turnely. Tu objetivo es asistir a administradores de clínicas. Responde en español de forma cortés, técnica y conversacional.'
-  };
-
-  if (fs.existsSync(configPath)) {
-     try {
-       const savedData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-       const mergedLimits = { ...envConfig.limits, ...(savedData.limits || {}) };
-       const mergedPrices = { ...envConfig.prices, ...(savedData.prices || {}) };
-       return { ...envConfig, ...savedData, limits: mergedLimits, prices: mergedPrices };
-     } catch (e) {
-       console.error("Error reading system config", e);
-     }
-  }
-  return envConfig;
-}
 
 function initializeAI() {
   const cfg = getSystemConfig();
-  const apiKey = process.env.GEMINI_API_KEY || cfg.apiKey || process.env.GCP_API_KEY;
+  const apiKey = cfg.apiKey;
   if (apiKey) {
-    ai = new GoogleGenAI({ 
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-    console.log("AI initialized with Google AI Studio API Key");
+    ai = new GoogleGenAI({ apiKey });
+    console.log(`[AI] Google Gemini inicializado con éxito. Modelo objetivo: ${cfg.model}`);
   } else {
     ai = null;
-    console.log("AI initialization skipped. Missing GEMINI_API_KEY.");
+    console.log('[AI] API Key de Gemini no configurada todavía. El bot responderá con plantilla de espera.');
   }
 }
 
 initializeAI();
 
-const PORT = 3000;
+// -------------------------------------------------------------
+// 4. WhatsApp Bot (Baileys) - Monoclínica
+// -------------------------------------------------------------
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const app = express();
 app.use(express.json());
 
-interface AppConfig {
+interface LocalBotState {
+  status: 'DISCONNECTED' | 'INITIALIZING' | 'QR_READY' | 'CONNECTED';
+  qr: string | null;
   botActive: boolean;
-  systemPrompt: string;
-  name: string;
-  plan: string;
-  messagesUsed: number;
+  messagesSent: number;
 }
 
-// In-memory store for WhatsApp clients and configs
-const waClients = new Map<string, any>();
-const waQRCodes = new Map<string, string>();
-const waStatus = new Map<string, string>();
-const waConfigs = new Map<string, AppConfig>();
+const botState: LocalBotState = {
+  status: 'DISCONNECTED',
+  qr: null,
+  botActive: true,
+  messagesSent: 0
+};
 
-async function startWhatsAppBot(clinicId: string, host: string) {
-  const authFolder = path.join(process.cwd(), 'wa_clients', clinicId);
-  const bookingUrl = `https://${host}/reservar/${clinicId}`;
+let activeSock: any = null;
+
+async function startWhatsAppBot(host: string) {
+  const clinic = getClinicConfig();
+  const clinicId = clinic.clinicId;
+  const authFolder = path.join(process.cwd(), 'wa_auth');
+
   if (!fs.existsSync(authFolder)) {
     fs.mkdirSync(authFolder, { recursive: true });
   }
@@ -118,7 +199,7 @@ async function startWhatsAppBot(clinicId: string, host: string) {
   const { state, saveCreds } = await useMultiFileAuthState(authFolder);
   const logger = pino({ level: 'silent' });
   const { version } = await fetchLatestBaileysVersion();
-  
+
   const sock = makeWASocket({
     version,
     auth: state,
@@ -128,188 +209,165 @@ async function startWhatsAppBot(clinicId: string, host: string) {
     syncFullHistory: false
   });
 
+  activeSock = sock;
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
-    
+
     if (qr) {
-      waStatus.set(clinicId, 'QR_READY');
+      botState.status = 'QR_READY';
       try {
-        const qrBase64 = await QRCode.toDataURL(qr);
-        waQRCodes.set(clinicId, qrBase64);
+        botState.qr = await QRCode.toDataURL(qr);
       } catch (err) {
-        console.error('Failed to generate QR', err);
+        console.error('[WhatsApp] Fallo al generar QR en Base64', err);
       }
     }
 
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      waStatus.set(clinicId, 'DISCONNECTED');
+      botState.status = 'DISCONNECTED';
+      console.log(`[WhatsApp] Conexión cerrada. Reconectar: ${shouldReconnect}`);
+
       if (shouldReconnect) {
-        setTimeout(() => startWhatsAppBot(clinicId, host), 5000);
+        setTimeout(() => startWhatsAppBot(host), 5000);
       } else {
-        waQRCodes.delete(clinicId);
+        botState.qr = null;
         if (fs.existsSync(authFolder)) {
           fs.rmSync(authFolder, { recursive: true, force: true });
         }
-        waClients.delete(clinicId);
+        activeSock = null;
       }
     } else if (connection === 'open') {
-      waStatus.set(clinicId, 'CONNECTED');
-      waQRCodes.delete(clinicId);
+      botState.status = 'CONNECTED';
+      botState.qr = null;
+      console.log(`[WhatsApp] ¡Conectado exitosamente para ${clinic.clinicName}!`);
     }
   });
 
   sock.ev.on('messages.upsert', async (m) => {
     if (m.type !== 'notify') return;
+
     for (const msg of m.messages) {
       if (!msg.message || msg.key.fromMe) continue;
-      
+
       const remoteJid = msg.key.remoteJid;
-      if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue; 
-      
+      if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
+
       const textMessage = msg.message.conversation || msg.message.extendedTextMessage?.text;
       if (!textMessage) continue;
 
-      const clinicConfig = waConfigs.get(clinicId);
-      if (!clinicConfig || !clinicConfig.botActive) continue;
+      if (!botState.botActive) continue;
 
-      const systemConfig = getSystemConfig();
-      const plan = clinicConfig.plan || 'GRATIS';
-      const limit = systemConfig.limits[plan as keyof typeof systemConfig.limits] || 0;
+      const protocol = host.includes('localhost') ? 'http' : 'https';
+      const bookingUrl = `${protocol}://${host}/reservar`;
 
-      if (clinicConfig.messagesUsed >= limit) {
-         continue; // Reject since limit is reached
-      }
+      // 1. Detección automática de confirmación de reserva enviada desde la web
+      const bookingMatch = textMessage.match(/He reservado un turno para el (\d{4}-\d{2}-\d{2}) a las (\d{2}:\d{2})h/);
+      const dniMatch = textMessage.match(/\(DNI: (.*?)\)/);
 
-      if (ai) {
+      if (bookingMatch && dniMatch) {
+        const date = bookingMatch[1];
+        const time = bookingMatch[2];
+        const dni = dniMatch[1];
+
+        console.log(`[WhatsApp] Confirmación de turno detectada: DNI ${dni} fecha ${date} ${time}`);
+
         try {
-          // Check if message is a booking confirmation link text
-          // Example: "Hola! Soy Juan Pérez (DNI: 1234). He reservado un turno para el 2026-05-24 a las 17:30h."
-          const bookingMatch = textMessage.match(/He reservado un turno para el (\d{4}-\d{2}-\d{2}) a las (\d{2}:\d{2})h/);
-          const dniMatch = textMessage.match(/\(DNI: (.*?)\)/);
+          const patientsRef = getDb().collection('clinics').doc(clinicId).collection('patients');
+          const patientSnap = await patientsRef.where('dni', '==', dni).limit(1).get();
 
-          if (bookingMatch && dniMatch) {
-            const date = bookingMatch[1];
-            const time = bookingMatch[2];
-            const dni = dniMatch[1];
+          if (!patientSnap.empty) {
+            const patientId = patientSnap.docs[0].id;
+            const appointmentsRef = getDb().collection('clinics').doc(clinicId).collection('appointments');
+            const appSnap = await appointmentsRef
+              .where('patientId', '==', patientId)
+              .where('date', '==', date)
+              .where('time', '==', time)
+              .limit(1)
+              .get();
 
-            console.log(`Potential booking confirmation detected for DNI ${dni} on ${date} at ${time}`);
-
-            // Find the patient first
-            const patientsRef = getDb().collection('clinics').doc(clinicId).collection('patients');
-            const patientSnap = await patientsRef.where('dni', '==', dni).limit(1).get();
-
-            if (!patientSnap.empty) {
-              const patientId = patientSnap.docs[0].id;
-              const appointmentsRef = getDb().collection('clinics').doc(clinicId).collection('appointments');
-              
-              // Find or create the appointment
-              const appSnap = await appointmentsRef
-                .where('patientId', '==', patientId)
-                .where('date', '==', date)
-                .where('time', '==', time)
-                .limit(1)
-                .get();
-
-              if (!appSnap.empty) {
-                await appSnap.docs[0].ref.update({ status: 'CONFIRMED', updatedAt: FieldValue.serverTimestamp() });
-              } else {
-                // Create if it doesn't exist (though it should have been created by the portal or we can create it now)
-                await appointmentsRef.add({
-                  clinicOwnerId: clinicId,
-                  patientId,
-                  patientDni: dni,
-                  date,
-                  time,
-                  status: 'CONFIRMED',
-                  createdAt: FieldValue.serverTimestamp(),
-                  updatedAt: FieldValue.serverTimestamp()
-                });
-              }
-              
-              await sock.sendMessage(remoteJid, { text: `¡Perfecto! Su turno para el ${date} a las ${time}h ha sido CONFIRMADO. ¡Lo esperamos!` });
-              
-              const clinicRef = getDb().collection('clinics').doc(clinicId);
-              await clinicRef.update({ 
-                messagesUsed: FieldValue.increment(1),
-                updatedAt: FieldValue.serverTimestamp() 
+            if (!appSnap.empty) {
+              await appSnap.docs[0].ref.update({
+                status: 'CONFIRMED',
+                updatedAt: FieldValue.serverTimestamp()
               });
-              
-              continue; // Skip AI generation for this message as it's handled
             }
           }
 
-          const systemPrompt = clinicConfig.systemPrompt || "Eres un asistente virtual médico. Responde en español, sé sumamente cordial.";
+          await sock.sendMessage(remoteJid, {
+            text: `¡Excelente! Su turno para el día ${date} a las ${time} hs con el ${clinic.doctorName} ha sido CONFIRMADO. ¡Lo esperamos en ${clinic.address}!`
+          });
+          botState.messagesSent += 1;
+        } catch (e) {
+          console.error('[WhatsApp] Error confirmando cita en BD:', e);
+        }
+        continue;
+      }
 
+      // 2. Respuesta con Inteligencia Artificial (Google Gemini)
+      if (ai) {
+        try {
+          const sysCfg = getSystemConfig();
           await sock.presenceSubscribe(remoteJid);
           await sock.sendPresenceUpdate('composing', remoteJid);
-          
-          const bookingUrl = `https://${host}/reservar/${clinicId}`;
+
           const consultarEstadoPaciente: FunctionDeclaration = {
-            name: "consultarEstadoPaciente",
-            description: "Consulta si el paciente está registrado y si tiene un turno pendiente usando su DNI. Úsalo siempre que el paciente te dé su DNI.",
+            name: 'consultarEstadoPaciente',
+            description: 'Consulta si el paciente tiene un turno registrado usando su DNI.',
             parameters: {
               type: Type.OBJECT,
               properties: {
                 dni: {
                   type: Type.STRING,
-                  description: "El documento de identidad o DNI del paciente."
+                  description: 'El DNI o documento del paciente.'
                 }
               },
-              required: ["dni"]
+              required: ['dni']
             }
           };
 
+          const dynamicPrompt = sysCfg.systemPrompt.replace('{bookingUrl}', bookingUrl);
+
           const generationConfig = {
-            systemInstruction: `Eres el agente inteligente de una clínica médica. El nombre de la clínica es "${clinicConfig.name}". Solo tienes tareas de soporte, agendamiento y respuestas a dudas generales. Sigue estas instrucciones: ${systemPrompt}. Cuando un paciente se comunique para pedir un turno, PRIMERO debes pedirle su DNI (Documento de Identidad) obligatoriamente para asegurarte de que no tenga ya un turno asignado y se haya olvidado. ¡IMPORTANTE: NO LE MUESTRES EL ENLACE DE LA AGENDA Y NO LE PERMITAS AGENDAR HASTA TENER SU DNI! Una vez que te entregue el DNI, usa la herramienta consultarEstadoPaciente. Si la herramienta indica que YA TIENE turno, dale la información del mismo. Si la herramienta indica que NO TIENE turno o no está registrado, ENTONCES dale amablemente el siguiente enlace para que pueda agendarlo: ${bookingUrl}\n\nSi el paciente te indica que desea CANCELAR un turno, debes informarle que puede hacerlo ingresando a la agenda con su DNI para gestionar la cancelación de forma autónoma. Entrégale el link: ${bookingUrl}\n\nIMPORTANTE PARA ENLACES: Al enviar el link, envíalo como texto crudo, SIN utilizar formato Markdown para enlaces (NO uses [texto](URL)). WhatsApp requiere que los links se envíen completos y sin envolver en otros caracteres para que sean clickeables.`,
+            systemInstruction: `${dynamicPrompt}\n\nDatos de la clínica:\n- Nombre: ${clinic.clinicName}\n- Profesional: ${clinic.doctorName}\n- Especialidad: ${clinic.specialty}\n- Dirección: ${clinic.address}, ${clinic.city}\n- Horarios: ${clinic.workingHours}\n- Obras Sociales Aceptadas: ${clinic.insurances.join(', ')}\n- Enlace directo para agendar: ${bookingUrl}\n\nIMPORTANTE:\n1. Si el paciente pide turno, explícale que puede elegir día y hora de forma directa e inmediata haciendo clic en el enlace de la agenda: ${bookingUrl}\n2. Si el paciente ya te dio su DNI para consultar su turno, usa la herramienta consultarEstadoPaciente.\n3. Envía siempre los enlaces como texto limpio (ej: ${bookingUrl}), NUNCA uses formato markdown de enlaces tipo [texto](url).`,
             tools: [{ functionDeclarations: [consultarEstadoPaciente] }]
           };
 
           const response1 = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: sysCfg.model || 'gemini-2.0-flash',
             contents: `Mensaje del paciente: "${textMessage}"`,
             config: generationConfig
           });
 
-          let replyText = 'Error generando respuesta.';
+          let replyText = '';
 
           if (response1.functionCalls && response1.functionCalls.length > 0) {
             const call = response1.functionCalls[0];
             if (call.name === 'consultarEstadoPaciente') {
               const dniArg = call.args.dni;
-              let toolResultStr = "Error al consultar la base de datos.";
-              
+              let toolResultStr = 'No se encontró registro.';
+
               if (typeof dniArg === 'string') {
                 const patientsRef = getDb().collection('clinics').doc(clinicId).collection('patients');
                 const patientSnap = await patientsRef.where('dni', '==', dniArg).limit(1).get();
-                
+
                 if (patientSnap.empty) {
-                  toolResultStr = `Base de datos: El paciente con DNI ${dniArg} NO está en el sistema. Debe registrarse y sacar turno en el portal.`;
+                  toolResultStr = `El DNI ${dniArg} no tiene turnos pendientes registrados. Indícale que puede agendar aquí: ${bookingUrl}`;
                 } else {
                   const patientId = patientSnap.docs[0].id;
-                  const patientData = patientSnap.docs[0].data();
                   const appointmentsRef = getDb().collection('clinics').doc(clinicId).collection('appointments');
-                  // Consultar turnos futuros
-                  const d = new Date();
-                  const year = d.getFullYear();
-                  const month = String(d.getMonth() + 1).padStart(2, '0');
-                  const day = String(d.getDate()).padStart(2, '0');
-                  const todayStr = `${year}-${month}-${day}`;
                   const apptSnap = await appointmentsRef
                     .where('patientId', '==', patientId)
-                    .where('date', '>=', todayStr)
+                    .where('status', 'in', ['SCHEDULED', 'CONFIRMED'])
                     .get();
-                  
-                  const validAppts = apptSnap.docs.filter((d: any) => d.data().status !== 'CANCELLED');
-                  if (validAppts.length > 0) {
-                    const sortedAppts = validAppts.sort((a: any, b: any) => a.data().date.localeCompare(b.data().date));
-                    const appt = sortedAppts[0].data();
-                    toolResultStr = `Base de datos: El paciente ${patientData.name || 'registrado'} tiene un turno CONFIRMADO el ${appt.date} a las ${appt.time}h.`;
+
+                  if (!apptSnap.empty) {
+                    const appt = apptSnap.docs[0].data();
+                    toolResultStr = `El paciente tiene un turno agendado para el ${appt.date} a las ${appt.time} hs con el ${clinic.doctorName}.`;
                   } else {
-                     toolResultStr = `Base de datos: El paciente ${patientData.name || 'registrado'} está registrado en el sistema pero NO tiene turnos pendientes. Ofrécele el portal de turnos para agendar.`;
+                    toolResultStr = `El paciente no tiene turnos pendientes. Puede elegir uno en ${bookingUrl}`;
                   }
                 }
               }
@@ -317,7 +375,7 @@ async function startWhatsAppBot(clinicId: string, host: string) {
               const previousContent = response1.candidates?.[0]?.content;
               if (previousContent) {
                 const response2 = await ai.models.generateContent({
-                  model: 'gemini-3.8-flash',
+                  model: sysCfg.model || 'gemini-2.0-flash',
                   contents: [
                     { role: 'user', parts: [{ text: `Mensaje del paciente: "${textMessage}"` }] },
                     previousContent,
@@ -325,222 +383,286 @@ async function startWhatsAppBot(clinicId: string, host: string) {
                   ],
                   config: generationConfig
                 });
-                replyText = response2.text || 'No pude encontrar la información, disculpa las molestias.';
-              } else {
-                replyText = 'Error en el flujo de la consulta. Por favor, intenta de nuevo.';
+                replyText = response2.text || 'Disculpa, no pude procesar la consulta en este momento.';
               }
             }
           } else {
-            replyText = response1.text || 'Error generando respuesta.';
+            replyText = response1.text || '';
+          }
+
+          if (!replyText) {
+            replyText = `¡Hola! Gracias por comunicarte con el ${clinic.clinicName}. Para agendar tu turno online podés ingresar a: ${bookingUrl}`;
           }
 
           await sock.sendPresenceUpdate('paused', remoteJid);
           await sock.sendMessage(remoteJid, { text: replyText });
-          
-          // Increment messagesUsed in DB
-          const clinicRef = getDb().collection('clinics').doc(clinicId);
-          await clinicRef.update({ 
-            messagesUsed: FieldValue.increment(1),
-            updatedAt: FieldValue.serverTimestamp() 
-          });
-
-          clinicConfig.messagesUsed += 1;
-          waConfigs.set(clinicId, clinicConfig);
+          botState.messagesSent += 1;
 
         } catch (err) {
-          console.error("AI Error:", err);
+          console.error('[AI] Error procesando mensaje con Gemini:', err);
           await sock.sendPresenceUpdate('paused', remoteJid);
+          await sock.sendMessage(remoteJid, {
+            text: `¡Hola! Gracias por comunicarte con ${clinic.clinicName}. En este momento estamos procesando consultas. Podés agendar tu turno directamente en nuestra agenda online: ${bookingUrl}`
+          });
         }
       } else {
-        console.error("AI instance not initialized. Cannot answer.");
+        // Fallback cuando la API key aún no está seteada
+        await sock.sendMessage(remoteJid, {
+          text: `¡Hola! Gracias por escribirnos a ${clinic.clinicName}. Podés agendar o consultar los horarios disponibles directamente en: ${bookingUrl}`
+        });
       }
     }
   });
-
-  waClients.set(clinicId, sock);
 }
 
-// System Admin API
+// -------------------------------------------------------------
+// 5. Endpoints Públicos y de la Clínica
+// -------------------------------------------------------------
+
+// Configuración pública de la clínica (para la Landing Page y Portal de Turnos)
+app.get('/api/clinic-config', (req, res) => {
+  res.json(getClinicConfig());
+});
+
+// Verificación de DNI / Turnos existentes
+app.post('/api/public/check-dni', async (req, res) => {
+  try {
+    const { dni } = req.body;
+    const clinic = getClinicConfig();
+    const clinicId = clinic.clinicId;
+    const db = getDb();
+
+    const pSnap = await db.collection('clinics').doc(clinicId).collection('patients').where('dni', '==', dni).limit(1).get();
+    if (pSnap.empty) return res.json({ found: false });
+
+    const pData = { id: pSnap.docs[0].id, ...pSnap.docs[0].data() };
+    if (pData.createdAt?.toDate) pData.createdAt = pData.createdAt.toDate().toISOString();
+    if (pData.updatedAt?.toDate) pData.updatedAt = pData.updatedAt.toDate().toISOString();
+
+    const aSnap = await db.collection('clinics').doc(clinicId).collection('appointments')
+      .where('patientId', '==', pData.id)
+      .where('status', 'in', ['SCHEDULED', 'CONFIRMED'])
+      .get();
+
+    let existingAppointment = null;
+    if (!aSnap.empty) {
+      existingAppointment = { id: aSnap.docs[0].id, ...aSnap.docs[0].data() };
+      if (existingAppointment.createdAt?.toDate) existingAppointment.createdAt = existingAppointment.createdAt.toDate().toISOString();
+      if (existingAppointment.updatedAt?.toDate) existingAppointment.updatedAt = existingAppointment.updatedAt.toDate().toISOString();
+    }
+
+    res.json({ found: true, patient: pData, existingAppointment });
+  } catch (err: any) {
+    console.error('Error in check-dni:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Registro de nuevo paciente
+app.post('/api/public/register', async (req, res) => {
+  try {
+    const { patient } = req.body;
+    const clinic = getClinicConfig();
+    const clinicId = clinic.clinicId;
+    const db = getDb();
+
+    patient.clinicOwnerId = clinicId;
+    patient.createdAt = FieldValue.serverTimestamp();
+    patient.updatedAt = FieldValue.serverTimestamp();
+
+    const docRef = await db.collection('clinics').doc(clinicId).collection('patients').add(patient);
+    res.json({ id: docRef.id });
+  } catch (err: any) {
+    console.error('Error registering patient:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cancelación de cita por el paciente
+app.post('/api/public/cancel', async (req, res) => {
+  try {
+    const { appointmentId } = req.body;
+    const clinic = getClinicConfig();
+    const clinicId = clinic.clinicId;
+    const db = getDb();
+
+    await db.collection('clinics').doc(clinicId).collection('appointments').doc(appointmentId).update({
+      status: 'CANCELLED',
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error cancelling appointment:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Horarios ocupados para una fecha
+app.post('/api/public/slots', async (req, res) => {
+  try {
+    const { date } = req.body;
+    const clinic = getClinicConfig();
+    const clinicId = clinic.clinicId;
+    const db = getDb();
+
+    const snap = await db.collection('clinics').doc(clinicId).collection('appointments').where('date', '==', date).get();
+    const occupied = snap.docs
+      .filter((d: any) => d.data().status !== 'CANCELLED')
+      .map((d: any) => d.data().time);
+
+    res.json({ occupied });
+  } catch (err: any) {
+    console.error('Error getting slots:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Agendar nueva cita
+app.post('/api/public/book', async (req, res) => {
+  try {
+    const { appointment } = req.body;
+    const clinic = getClinicConfig();
+    const clinicId = clinic.clinicId;
+    const db = getDb();
+
+    appointment.clinicOwnerId = clinicId;
+    appointment.status = appointment.status || 'SCHEDULED';
+    appointment.createdAt = FieldValue.serverTimestamp();
+    appointment.updatedAt = FieldValue.serverTimestamp();
+
+    const docRef = await db.collection('clinics').doc(clinicId).collection('appointments').add(appointment);
+    res.json({ id: docRef.id });
+  } catch (err: any) {
+    console.error('Error booking appointment:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 6. Endpoints de WhatsApp & Administración
+// -------------------------------------------------------------
+
+// Iniciar socket de WhatsApp
+app.post('/api/whatsapp/start', async (req, res) => {
+  const host = req.get('host') || 'localhost:3000';
+  if (botState.status === 'DISCONNECTED') {
+    botState.status = 'INITIALIZING';
+    startWhatsAppBot(host);
+  }
+  res.json({ status: botState.status, qr: botState.qr });
+});
+
+// Estado de WhatsApp
+app.get('/api/whatsapp/status', (req, res) => {
+  res.json({
+    status: botState.status,
+    qr: botState.qr,
+    botActive: botState.botActive,
+    messagesSent: botState.messagesSent
+  });
+});
+
+// Pausar / Activar el bot
+app.post('/api/whatsapp/toggle-bot', (req, res) => {
+  const { active } = req.body;
+  botState.botActive = !!active;
+  res.json({ success: true, botActive: botState.botActive });
+});
+
+// Enviar recordatorios manuales desde el panel
+app.post('/api/whatsapp/send-reminders', async (req, res) => {
+  try {
+    const { appointments } = req.body;
+    if (!appointments || !Array.isArray(appointments)) {
+      return res.status(400).json({ error: 'Lista de turnos requerida' });
+    }
+
+    if (!activeSock || botState.status !== 'CONNECTED') {
+      return res.status(400).json({ error: 'WhatsApp no está conectado' });
+    }
+
+    const clinic = getClinicConfig();
+    res.json({ success: true, count: appointments.length, message: 'Enviando recordatorios...' });
+
+    (async () => {
+      for (const appt of appointments) {
+        try {
+          if (!appt.phone) continue;
+          const cleanNumber = appt.phone.replace(/\D/g, '');
+          const waCheck = await activeSock.onWhatsApp(cleanNumber);
+
+          if (!waCheck || waCheck.length === 0 || !waCheck[0].exists) {
+            console.log(`[Reminder] Número no encontrado en WA: ${cleanNumber}`);
+            continue;
+          }
+
+          const jid = waCheck[0].jid;
+          const messageText = `Hola ${appt.patientName}! 👋 Te recordamos que tenés un turno agendado en ${clinic.clinicName} para el día ${appt.date} a las ${appt.time} hs con el ${clinic.doctorName}.\n\nPor favor respondé este mensaje con:\n1️⃣ para CONFIRMAR tu asistencia.\n2️⃣ para CANCELAR o solicitar reprogramar.\n\n¡Te esperamos!`;
+
+          await activeSock.sendMessage(jid, { text: messageText });
+          console.log(`[Reminder] Recordatorio enviado a ${jid}`);
+          botState.messagesSent += 1;
+
+          // Pausa de 15 segundos entre envíos para comportamiento natural
+          await new Promise(r => setTimeout(r, 15000));
+        } catch (err) {
+          console.error(`Error enviando recordatorio a ${appt.phone}:`, err);
+        }
+      }
+    })();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 7. Panel SuperAdmin (Tú: API Key, Prompts y Modelos)
+// -------------------------------------------------------------
 app.get('/api/admin/system-config', (req, res) => {
-   res.json(getSystemConfig());
+  const adminKey = req.headers['x-admin-key'];
+  const sysConfig = getSystemConfig();
+  if (adminKey !== sysConfig.adminSecret) {
+    return res.status(401).json({ error: 'Unauthorized: Secret key inválida' });
+  }
+  res.json(sysConfig);
 });
 
 app.post('/api/admin/system-config', (req, res) => {
-   const adminKey = req.headers['x-admin-key'];
-   if (adminKey !== process.env.ADMIN_SECRET) {
-      return res.status(401).json({ error: 'Unauthorized' });
-   }
-   const { apiKey, projectId, location, limits, prices, voiceAgentPrompt } = req.body;
-   const existing = getSystemConfig();
-   const newConfig = { ...existing, apiKey, projectId, location, limits: limits || existing.limits, prices: prices || existing.prices, voiceAgentPrompt: voiceAgentPrompt || existing.voiceAgentPrompt };
-   fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2));
-   initializeAI();
-   res.json({ success: true });
-});
-
-// We need a way for regular clients to get the limits and prices
-app.get('/api/system-limits', (req, res) => {
-   const config = getSystemConfig();
-   res.json({ limits: config.limits, prices: config.prices, voiceAgentPrompt: config.voiceAgentPrompt });
-});
-
-async function verifyFirebaseToken(req: any, res: any, next: any) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: No token provided' });
-  }
-  const token = authHeader.split('Bearer ')[1];
-  try {
-    const decodedToken = await getAuth(getFirebaseAdmin()).verifyIdToken(token);
-    req.user = decodedToken;
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-  }
-}
-
-app.post('/api/public/check-dni', async (req, res) => {
-  const { clinicId, dni } = req.body;
-  const db = getDb();
-  const pSnap = await db.collection('clinics').doc(clinicId).collection('patients').where('dni', '==', dni).where('clinicOwnerId', '==', clinicId).limit(1).get();
-  if (pSnap.empty) return res.json({ found: false });
-  const pData = { id: pSnap.docs[0].id, ...pSnap.docs[0].data() };
-  if(pData.createdAt) pData.createdAt = pData.createdAt.toDate().toISOString();
-  if(pData.updatedAt) pData.updatedAt = pData.updatedAt.toDate().toISOString();
-
-  const aSnap = await db.collection('clinics').doc(clinicId).collection('appointments').where('patientId', '==', pData.id).where('status', '==', 'SCHEDULED').get();
-  let existingAppointment = null;
-  if (!aSnap.empty) {
-    existingAppointment = { id: aSnap.docs[0].id, ...aSnap.docs[0].data() };
-    if(existingAppointment.createdAt) existingAppointment.createdAt = existingAppointment.createdAt.toDate().toISOString();
-    if(existingAppointment.updatedAt) existingAppointment.updatedAt = existingAppointment.updatedAt.toDate().toISOString();
-  }
-  res.json({ found: true, patient: pData, existingAppointment });
-});
-
-app.post('/api/public/register', async (req, res) => {
-  const { clinicId, patient } = req.body;
-  const db = getDb();
-  patient.createdAt = FieldValue.serverTimestamp();
-  patient.updatedAt = FieldValue.serverTimestamp();
-  const docRef = await db.collection('clinics').doc(clinicId).collection('patients').add(patient);
-  res.json({ id: docRef.id });
-});
-
-app.post('/api/public/cancel', async (req, res) => {
-  const { clinicId, appointmentId } = req.body;
-  const db = getDb();
-  await db.collection('clinics').doc(clinicId).collection('appointments').doc(appointmentId).update({ status: 'CANCELLED', updatedAt: FieldValue.serverTimestamp() });
-  res.json({ success: true });
-});
-
-app.post('/api/public/slots', async (req, res) => {
-  const { clinicId, date } = req.body;
-  const db = getDb();
-  const snap = await db.collection('clinics').doc(clinicId).collection('appointments').where('date', '==', date).get();
-  const occupied = snap.docs.filter((d: any) => d.data().status !== 'CANCELLED').map((d: any) => d.data().time);
-  res.json({ occupied });
-});
-
-app.post('/api/public/book', async (req, res) => {
-  const { clinicId, appointment } = req.body;
-  const db = getDb();
-  appointment.createdAt = FieldValue.serverTimestamp();
-  appointment.updatedAt = FieldValue.serverTimestamp();
-  const docRef = await db.collection('clinics').doc(clinicId).collection('appointments').add(appointment);
-  res.json({ id: docRef.id });
-});
-
-// API Routes
-app.post('/api/whatsapp/start', verifyFirebaseToken, async (req, res) => {
-  const { clinicId } = req.body;
-  if (!clinicId) return res.status(400).json({ error: 'clinicId is required' });
-  const host = req.get('host') || 'localhost:3000';
-  
-  if (!waClients.has(clinicId)) {
-    waStatus.set(clinicId, 'INITIALIZING');
-    await startWhatsAppBot(clinicId, host);
-  }
-  
-  res.json({ status: waStatus.get(clinicId) });
-});
-
-app.post('/api/whatsapp/config', verifyFirebaseToken, (req, res) => {
-  const { clinicId, botActive, systemPrompt, name, plan, messagesUsed } = req.body;
-  if (!clinicId) return res.status(400).json({ error: 'clinicId is required' });
-  
-  const existingConfig = waConfigs.get(clinicId);
-  const newMessagesUsed = Math.max(existingConfig?.messagesUsed || 0, messagesUsed || 0);
-
-  waConfigs.set(clinicId, {
-     botActive: !!botActive,
-     systemPrompt: systemPrompt || '',
-     name: name || 'Clínica',
-     plan: plan || 'GRATIS',
-     messagesUsed: newMessagesUsed
-  });
-  res.json({ success: true });
-});
-
-app.get('/api/whatsapp/status/:clinicId', verifyFirebaseToken, (req, res) => {
-  const { clinicId } = req.params;
-  const status = waStatus.get(clinicId) || 'DISCONNECTED';
-  const qr = waQRCodes.get(clinicId) || null;
-  const clinicConfig = waConfigs.get(clinicId);
-  const messagesUsed = clinicConfig ? clinicConfig.messagesUsed : null;
-  
-  res.json({ status, qr, messagesUsed });
-});
-
-app.post('/api/whatsapp/send-reminders', verifyFirebaseToken, async (req, res) => {
-  const { clinicId, appointments } = req.body;
-  if (!clinicId || !appointments || !Array.isArray(appointments)) {
-    return res.status(400).json({ error: 'Solicitud inválida' });
+  const adminKey = req.headers['x-admin-key'];
+  const existing = getSystemConfig();
+  if (adminKey !== existing.adminSecret) {
+    return res.status(401).json({ error: 'Unauthorized: Secret key inválida' });
   }
 
-  const sock = waClients.get(clinicId);
-  if (!sock) return res.status(400).json({ error: 'WhatsApp no está conectado' });
-  
-  const clinicConfig = waConfigs.get(clinicId);
-  if (clinicConfig?.plan !== 'PREMIUM') {
-    return res.status(403).json({ error: 'Funcionalidad exclusiva del plan PREMIUM' });
-  }
-  
-  res.json({ success: true, count: appointments.length, message: 'Enviando recordatorios en segundo plano...' });
+  const { apiKey, model, adminSecret, systemPrompt } = req.body;
+  const newConfig: SystemConfig = {
+    apiKey: apiKey !== undefined ? apiKey : existing.apiKey,
+    model: model || existing.model,
+    adminSecret: adminSecret || existing.adminSecret,
+    systemPrompt: systemPrompt !== undefined ? systemPrompt : existing.systemPrompt
+  };
 
-  // Background task
-  (async () => {
-    for (const appt of appointments) {
-      try {
-        if (!appt.phone) continue;
-        const cleanNumber = appt.phone.replace(/\D/g, '');
-        
-        // WhatsApp internally still uses the @s.whatsapp.net format.
-        // For some countries like Argentina it might need an extra '9' (e.g. 549...).
-        // sock.onWhatsApp returns the correct internal JID for the user if they exist.
-        const waCheck = await sock.onWhatsApp(cleanNumber);
-        
-        if (!waCheck || waCheck.length === 0 || !waCheck[0].exists) {
-           console.log(`Number ${cleanNumber} is not registered on WhatsApp (or format is incorrect).`);
-           continue;
-        }
-
-        const jid = waCheck[0].jid;
-        const messageText = `Hola ${appt.patientName}. Te recordamos que tienes un turno agendado para el dia de mañana (${appt.date}) a las ${appt.time}hs. ¡Te esperamos!`;
-        
-        await sock.sendMessage(jid, { text: messageText });
-        console.log(`Reminder sent to ${jid}`);
-        
-        // Wait 20 seconds between sends to prevent anti-spam ban
-        await new Promise(r => setTimeout(r, 20000));
-      } catch (err) {
-        console.error(`Error sending reminder to ${appt.phone}:`, err);
-      }
-    }
-    console.log(`Finished sending ${appointments.length} reminders for ${clinicId}`);
-  })();
+  fs.writeFileSync(systemConfigPath, JSON.stringify(newConfig, null, 2));
+  initializeAI();
+  res.json({ success: true, config: newConfig });
 });
 
+// Guardar cambios en la configuración del consultorio
+app.post('/api/admin/clinic-config', (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  const sysConfig = getSystemConfig();
+  if (adminKey !== sysConfig.adminSecret && adminKey !== 'clinic-admin') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const updatedConfig = req.body;
+  fs.writeFileSync(clinicConfigPath, JSON.stringify(updatedConfig, null, 2));
+  res.json({ success: true, config: updatedConfig });
+});
+
+// -------------------------------------------------------------
+// 8. Inicialización del Servidor (Vite o Dist)
+// -------------------------------------------------------------
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -557,7 +679,10 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`===================================================`);
+    console.log(`🦷 Turnely / MediFlow Single-Client Platform`);
+    console.log(`🚀 Servidor activo en http://localhost:${PORT}`);
+    console.log(`===================================================`);
   });
 }
 
