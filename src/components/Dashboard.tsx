@@ -205,13 +205,104 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
   }, [user.uid]);
 
 
-  // Admin Config
-  const isAdmin = user.email === 'portadordelsello@gmail.com';
-  const [adminConfig, setAdminConfig] = useState({ apiKey: '', projectId: '', location: '', limits: { GRATIS: 100, BASICO: 500, PREMIUM: 1000 }, prices: { BASICO: 4999, PREMIUM: 14999 }, voiceAgentPrompt: 'Eres un experto de soporte técnico de Turnely...' });
-  const [savingAdmin, setSavingAdmin] = useState(false);
-  const [systemLimits, setSystemLimits] = useState({ GRATIS: 100, BASICO: 500, PREMIUM: 1000 });
+  // -------------------------------------------------------------
+  // Roles de usuario (3 niveles: SuperAdmin, Odontólogo, Secretaria)
+  // -------------------------------------------------------------
+  type UserRole = 'superadmin' | 'admin' | 'asistente';
+  const [currentRole, setCurrentRole] = useState<UserRole>('superadmin');
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [adminPinInput, setAdminPinInput] = useState('');
+  const [superAdminSecret, setSuperAdminSecret] = useState('superadmin123');
+
+  const [superAdminConfig, setSuperAdminConfig] = useState({
+    apiKey: '',
+    model: 'gemini-2.0-flash',
+    adminSecret: 'superadmin123',
+    systemPrompt: ''
+  });
+  const [savingSuperAdmin, setSavingSuperAdmin] = useState(false);
+  const [superAdminFeedback, setSuperAdminFeedback] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // Cargar configuración de SuperAdmin
+  const loadSuperAdminSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/system-config', {
+        headers: { 'x-admin-key': superAdminSecret }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSuperAdminConfig({
+          apiKey: data.apiKey || '',
+          model: data.model || 'gemini-2.0-flash',
+          adminSecret: data.adminSecret || superAdminSecret,
+          systemPrompt: data.systemPrompt || ''
+        });
+      }
+    } catch (e) {
+      console.error('Error cargando superadmin config:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadSuperAdminSettings();
+  }, []);
+
+  const saveSuperAdminSettings = async () => {
+    setSavingSuperAdmin(true);
+    setSuperAdminFeedback('');
+    try {
+      const res = await fetch('/api/admin/system-config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-key': superAdminSecret
+        },
+        body: JSON.stringify(superAdminConfig)
+      });
+      if (res.ok) {
+        setSuperAdminFeedback('¡Configuración técnica guardada correctamente!');
+        setTimeout(() => setSuperAdminFeedback(''), 4000);
+      } else {
+        alert('Error: PIN de SuperAdmin no autorizado.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error de conexión al guardar.');
+    } finally {
+      setSavingSuperAdmin(false);
+    }
+  };
+
+  // WhatsApp bot live toggle
+  const [botToggleLoading, setBotToggleLoading] = useState(false);
+  const toggleBot = async (active: boolean) => {
+    setBotToggleLoading(true);
+    try {
+      await fetch('/api/whatsapp/toggle-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active })
+      });
+      // Actualizar estado local
+      if (clinic) {
+        setClinic({ ...clinic, botActive: active });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBotToggleLoading(false);
+    }
+  };
+
+  const isAdmin = true; // Habilitado para modo monoclínica
+
+  // Variables de configuración de límites y precios del sistema
+  const [systemLimits, setSystemLimits] = useState({ GRATIS: 999999, BASICO: 999999, PREMIUM: 999999 });
   const [systemPrices, setSystemPrices] = useState({ BASICO: 4999, PREMIUM: 14999 });
-  const [systemVoiceAgentPrompt, setSystemVoiceAgentPrompt] = useState('Eres un experto de soporte técnico de Turnely...');
+  const [systemVoiceAgentPrompt, setSystemVoiceAgentPrompt] = useState('Eres un asistente telefónico médico');
+  const [adminConfig, setAdminConfig] = useState<any>({ limits: {}, prices: {} });
+  const [savingAdmin, setSavingAdmin] = useState(false);
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showCallModal, setShowCallModal] = useState(false);
@@ -913,15 +1004,43 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
       <aside className={`fixed inset-y-0 left-0 w-64 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform md:relative md:translate-x-0 shadow-2xl md:shadow-none`}>
         <div className="p-6 border-b border-slate-800/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/turnely.jpg" alt="Turnely AI" className="w-10 h-10 rounded-xl object-cover shadow-lg shadow-sky-500/20" />
-            <h1 className="text-xl font-extrabold tracking-tight text-white">Turnely</h1>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-sky-500/20">
+              {clinic?.name ? clinic.name.charAt(0) : 'M'}
+            </div>
+            <div className="overflow-hidden">
+              <h1 className="text-base font-extrabold tracking-tight text-white truncate">{clinic?.name || 'Clínica Dental'}</h1>
+              <p className="text-[11px] text-slate-400 truncate">{clinic?.specialty || 'Gestión Médica'}</p>
+            </div>
           </div>
           <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-white">
             <X className="w-6 h-6" />
           </button>
         </div>
 
+        {/* Selector de Rol Activo */}
+        <div className="p-4 border-b border-slate-800/50 bg-slate-950/40">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            Rol de Acceso Activo
+          </label>
+          <select
+            value={currentRole}
+            onChange={(e) => {
+              const r = e.target.value as UserRole;
+              setCurrentRole(r);
+              if (r === 'asistente' && ['flujos', 'configuracion', 'admin'].includes(activeTab)) {
+                setActiveTab('agenda');
+              }
+            }}
+            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold py-1.5 px-2.5 focus:outline-none focus:ring-1 focus:ring-sky-500"
+          >
+            <option value="superadmin">👑 SuperAdmin (Técnico)</option>
+            <option value="admin">👨‍⚕️ Administrador (Odontólogo)</option>
+            <option value="asistente">📋 Asistente (Secretaría)</option>
+          </select>
+        </div>
+
         <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
+          {/* Agenda: Visible para todos */}
           <button 
             onClick={() => { setActiveTab('agenda'); setIsSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'agenda' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
@@ -930,6 +1049,7 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
             Agenda
           </button>
 
+          {/* Pacientes: Visible para todos */}
           <button 
             onClick={() => { setActiveTab('pacientes'); setIsSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'pacientes' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
@@ -938,49 +1058,47 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
             Pacientes
           </button>
           
-          <button 
-            onClick={() => { setActiveTab('flujos'); setIsSidebarOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'flujos' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-          >
-            <Bot className="w-5 h-5" />
-            Flujos Respuesta
-          </button>
-          
-          <button 
-            onClick={() => { setActiveTab('configuracion'); setIsSidebarOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'configuracion' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-          >
-            <Settings className="w-5 h-5" />
-            Configuración
-          </button>
+          {/* Flujos y WhatsApp: Ocultos para Asistente */}
+          {currentRole !== 'asistente' && (
+            <>
+              <button 
+                onClick={() => { setActiveTab('flujos'); setIsSidebarOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'flujos' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              >
+                <Bot className="w-5 h-5" />
+                Flujos Respuesta
+              </button>
+              
+              <button 
+                onClick={() => { setActiveTab('configuracion'); setIsSidebarOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'configuracion' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              >
+                <Settings className="w-5 h-5" />
+                WhatsApp
+              </button>
+            </>
+          )}
 
           <div className="pt-4 pb-2">
             <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Cuenta</p>
           </div>
 
           <button 
-            onClick={() => { setActiveTab('soporte'); setIsSidebarOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'soporte' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-          >
-            <HelpCircle className="w-5 h-5" />
-            Soporte
-          </button>
-
-          <button 
             onClick={() => { setActiveTab('perfil'); setIsSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'perfil' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
           >
             <UserIcon className="w-5 h-5" />
-            Perfil
+            Perfil Clínica
           </button>
 
-          {isAdmin && (
+          {/* SuperAdmin: Visible exclusivamente en rol superadmin */}
+          {currentRole === 'superadmin' && (
             <button 
               onClick={() => { setActiveTab('admin'); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'admin' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${activeTab === 'admin' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-400 hover:bg-slate-800 hover:text-emerald-300'}`}
             >
               <Lock className="w-5 h-5" />
-              Admin Sistema
+              Admin Sistema (IA)
             </button>
           )}
         </nav>
@@ -1006,21 +1124,27 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
              </button>
              <div>
                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                 {activeTab === 'agenda' && 'Agenda'}
-                 {activeTab === 'pacientes' && 'Pacientes'}
-                 {activeTab === 'flujos' && 'Flujos AI'}
-                 {activeTab === 'configuracion' && 'WhatsApp'}
-                 {activeTab === 'perfil' && 'Perfil'}
-                 {activeTab === 'admin' && 'Admin'}
+                 {activeTab === 'agenda' && 'Agenda Médica'}
+                 {activeTab === 'pacientes' && 'Registro de Pacientes'}
+                 {activeTab === 'flujos' && 'Flujos AI WhatsApp'}
+                 {activeTab === 'configuracion' && 'Conexión WhatsApp'}
+                 {activeTab === 'perfil' && 'Perfil de la Clínica'}
+                 {activeTab === 'admin' && 'Panel Técnico SuperAdmin'}
                  {activeTab === 'soporte' && 'Soporte y Ayuda'}
                </h2>
              </div>
           </div>
           <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+              currentRole === 'superadmin' ? 'bg-purple-100 text-purple-700' :
+              currentRole === 'admin' ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'
+            }`}>
+              {currentRole === 'superadmin' ? 'SuperAdmin' : currentRole === 'admin' ? 'Odontólogo' : 'Secretaría'}
+            </span>
             <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
                 {clinic?.name?.charAt(0) || user.email?.charAt(0) || 'U'}
             </div>
-            <span className="text-sm font-bold text-slate-700 hidden md:block">{clinic?.name || 'Mi Clínica'}</span>
+            <span className="text-sm font-bold text-slate-700 hidden md:block">{clinic?.name || 'Clínica Dental'}</span>
           </div>
         </header>
 
@@ -1088,33 +1212,13 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
                     </h3>
                     <div className="flex gap-2">
                       <button 
-                        onClick={() => {
-                          if (clinic?.plan !== 'PREMIUM') {
-                            setShowUpgradeModal(true);
-                          } else {
-                            handleSendReminders();
-                          }
-                        }}
+                        onClick={handleSendReminders}
                         disabled={isSendingReminders || appointments.filter(a => a.date === selectedDate && a.status !== 'CANCELLED').length === 0}
-                        className={`group relative text-xs py-1.5 px-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[90px] ${clinic?.plan !== 'PREMIUM' ? 'bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-800' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                        className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 text-xs py-1.5 px-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 min-w-[90px]"
+                        title="Enviar recordatorio de WhatsApp a los pacientes de este día"
                       >
-                        {clinic?.plan !== 'PREMIUM' ? (
-                           <>
-                             <span className="flex items-center gap-1 group-hover:hidden">
-                               <MessageCircle className="w-3.5 h-3.5" />
-                               Recordar
-                             </span>
-                             <span className="hidden items-center gap-1 group-hover:flex">
-                               <Lock className="w-3.5 h-3.5" />
-                               Solo Premium
-                             </span>
-                           </>
-                        ) : (
-                           <span className="flex items-center gap-1">
-                             <MessageCircle className="w-3.5 h-3.5" />
-                             Recordar
-                           </span>
-                        )}
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        {isSendingReminders ? 'Enviando...' : 'Recordar'}
                       </button>
                       <button 
                         onClick={() => toggleBlockDate(selectedDate)}
@@ -2025,345 +2129,158 @@ Responde de manera amable, útil, clara y en español. Nunca divagues ni reveles
             </div>
           )}
 
-          {/* TAB: ADMIN */}
-          {isAdmin && activeTab === 'admin' && (
-            <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
-              <div className="bg-white border border-indigo-100 rounded-[2rem] p-8 md:p-10 shadow-xl shadow-indigo-200/40 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none">
-                  <Lock className="w-48 h-48 text-indigo-900" />
-                </div>
-                <div className="relative z-10">
-                  <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-                    <ShieldCheck className="w-6 h-6 text-indigo-600" />
-                    Configuración Global del Sistema
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Gemini API Key</label>
-                        <input 
-                          type="password" 
-                          value={adminConfig.apiKey}
-                          onChange={e => setAdminConfig({...adminConfig, apiKey: e.target.value})}
-                          className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
-                          placeholder="••••••••••••••••"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Project ID</label>
-                        <input 
-                          type="text" 
-                          value={adminConfig.projectId}
-                          onChange={e => setAdminConfig({...adminConfig, projectId: e.target.value})}
-                          className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 tracking-wider">Límites (Mensajes/Mes)</h4>
-                      <div className="grid grid-cols-3 gap-3">
-                        {['GRATIS', 'BASICO', 'PREMIUM'].map(p => (
-                          <div key={p}>
-                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{p}</label>
-                            <input 
-                              type="number" 
-                              value={adminConfig.limits[p as keyof typeof adminConfig.limits]}
-                              onChange={e => setAdminConfig({...adminConfig, limits: { ...adminConfig.limits, [p]: parseInt(e.target.value) || 0 }})}
-                              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm"
-                            />
-                          </div>
-                        ))}
-                      </div>
-
-                      <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 mt-6 tracking-wider">Precios (ARS)</h4>
-                      <div className="grid grid-cols-2 gap-3">
-                        {['BASICO', 'PREMIUM'].map(p => (
-                          <div key={p}>
-                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{p}</label>
-                            <input 
-                              type="number" 
-                              value={adminConfig.prices[p as keyof typeof adminConfig.prices]}
-                              onChange={e => setAdminConfig({...adminConfig, prices: { ...adminConfig.prices, [p]: parseInt(e.target.value) || 0 }})}
-                              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-8 border-t border-slate-100 pt-6">
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Prompt Agente de Voz (IA Soporte)</label>
-                    <textarea 
-                      value={adminConfig.voiceAgentPrompt}
-                      onChange={e => setAdminConfig({...adminConfig, voiceAgentPrompt: e.target.value})}
-                      className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm h-32 resize-none"
-                    />
-                  </div>
-
-                  <div className="mt-8 flex justify-end">
-                    <button 
-                      onClick={saveAdminConfig}
-                      disabled={savingAdmin}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-xl transition-all shadow-sm flex items-center gap-2"
-                    >
-                      {savingAdmin ? 'Guardando...' : 'Actualizar Configuración'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Enhanced Clinics List */}
-              <div className="bg-white border border-slate-100 rounded-[2rem] shadow-xl shadow-slate-200/40 overflow-hidden">
-                <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white">
+          {/* TAB: SUPERADMIN (CONTROL TÉCNICO MAESTRO) */}
+          {(currentRole === 'superadmin' || isAdmin) && activeTab === 'admin' && (
+            <div className="max-w-5xl mx-auto space-y-8 animate-fade-in-up">
+              
+              {/* HEADER SUPERADMIN */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden border border-indigo-900/50">
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900">Gestión de Clínicas</h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      {allClinics.length} clínicas registradas en el sistema.
+                    <span className="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 font-bold text-xs uppercase tracking-wider border border-indigo-500/30 inline-block mb-2">
+                      Panel Técnico Exclusivo
+                    </span>
+                    <h3 className="text-2xl font-black">SuperAdministrador del Sistema</h3>
+                    <p className="text-slate-300 text-sm mt-1 max-w-xl">
+                      Gestiona la API Key de Google Gemini, el modelo activo de Inteligencia Artificial y el prompt conversacional que atiende a los pacientes por WhatsApp.
                     </p>
                   </div>
-                  <div className="relative w-full md:w-72">
-                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-                      <Settings className="w-4 h-4 text-slate-400" />
-                    </div>
-                    <input 
-                      type="text"
-                      placeholder="Buscar por nombre o ID..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                  <div className="flex items-center gap-2">
+                    <span className="px-3.5 py-1.5 rounded-xl bg-slate-800 text-xs font-mono text-emerald-400 border border-slate-700 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Modo: SuperAdmin
+                    </span>
                   </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-separate border-spacing-0">
-                    <thead>
-                      <tr className="bg-slate-50/50">
-                        <th className="px-8 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Clínica</th>
-                        <th className="px-8 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Plan / Créditos</th>
-                        <th className="px-8 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Estado Bot</th>
-                        <th className="px-8 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {allClinics.filter(c => 
-                        c.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                        c.id.includes(searchTerm) ||
-                        c.specialty?.toLowerCase().includes(searchTerm.toLowerCase())
-                      ).map(c => {
-                        const limit = systemLimits[c.plan as keyof typeof systemLimits] || 0;
-                        const usage = c.messagesUsed || 0;
-                        const usagePercent = Math.min(100, (usage / limit) * 100);
-                        
-                        return (
-                          <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-8 py-6">
-                              <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shadow-sm">
-                                  {c.name?.charAt(0) || '?'}
-                                </div>
-                                <div>
-                                  <p className="font-bold text-slate-900">{c.name || 'Sin nombre'}</p>
-                                  <p className="text-xs text-slate-500">{c.specialty || 'General'}</p>
-                                  <code className="text-[10px] text-slate-400 mt-1 block">ID: {c.id}</code>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-8 py-6">
-                              <div className="flex flex-col gap-2">
-                                <div className="flex items-center justify-between">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                    c.plan === 'PREMIUM' ? 'bg-indigo-100 text-indigo-700' :
-                                    c.plan === 'BASICO' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-700'
-                                  }`}>
-                                    {c.plan}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-slate-500">{usage} / {limit}</span>
-                                </div>
-                                <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                  <div 
-                                    className={`h-full rounded-full ${usagePercent > 90 ? 'bg-red-500' : usagePercent > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                                    style={{ width: `${usagePercent}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-8 py-6 text-sm">
-                              <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${c.botActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                                <span className={c.botActive ? 'text-emerald-700 font-medium' : 'text-slate-500'}>
-                                  {c.botActive ? 'Activo' : 'Inactivo'}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-8 py-6">
-                              <div className="flex items-center gap-2">
-                                <button 
-                                  onClick={() => setEditingClinic({ ...c })}
-                                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent"
-                                  title="Editar"
-                                >
-                                  <Settings className="w-5 h-5" />
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteClick(c)}
-                                  disabled={isDeleting && deletingClinicId === c.id}
-                                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent disabled:opacity-50 cursor-pointer"
-                                  title="Eliminar"
-                                >
-                                  {isDeleting && deletingClinicId === c.id ? (
-                                    <div className="w-5 h-5 border-2 border-red-200 border-t-red-600 rounded-full animate-spin" />
-                                  ) : (
-                                    <X className="w-5 h-5" />
-                                  )}
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {allClinics.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="px-8 py-20 text-center">
-                            <Bot className="w-16 h-16 text-slate-200 mx-auto mb-4" />
-                            <p className="text-slate-900 font-bold">No hay clínicas registradas</p>
-                            <p className="text-slate-500 text-sm">Las clínicas de los usuarios aparecerán aquí.</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
                 </div>
               </div>
 
-              {/* Delete Confirm Modal */}
-              {clinicToDelete && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0">
-                      <h4 className="text-lg font-bold text-red-600 flex items-center gap-2">
-                        <Lock className="w-5 h-5" /> Eliminar Clínica
-                      </h4>
-                      <button type="button" onClick={() => setClinicToDelete(null)} disabled={isDeleting} className="text-slate-400 hover:text-slate-600 disabled:opacity-50">
-                        <X className="w-6 h-6" />
-                      </button>
-                    </div>
-                    <div className="p-8 space-y-5">
-                      <p className="text-slate-700 text-sm">
-                        ¿Estás seguro de que deseas eliminar permanentemente la clínica <strong className="text-slate-900">{clinicToDelete.name || 'Sin nombre'}</strong>?
-                      </p>
-                      <div className="bg-red-50 p-4 rounded-2xl border border-red-100 mt-4">
-                        <p className="text-[12px] text-red-700 font-medium">
-                          Esta acción <strong>no se puede deshacer</strong> y borrará toda la información, turnos y pacientes asociadas a esta clínica de forma irreversible.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
-                      <button 
-                        type="button"
-                        onClick={() => setClinicToDelete(null)}
-                        disabled={isDeleting}
-                        className="flex-1 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
-                      >
-                        Cancelar
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={confirmDeleteClinic}
-                        disabled={isDeleting}
-                        className="flex-1 px-4 py-3 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors shadow-md shadow-red-100 disabled:opacity-50 flex items-center justify-center"
-                      >
-                        {isDeleting ? 'Eliminando...' : 'Sí, Eliminar'}
-                      </button>
-                    </div>
-                  </div>
+              {superAdminFeedback && (
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-sm flex items-center gap-2 shadow-sm">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                  {superAdminFeedback}
                 </div>
               )}
 
-              {/* Edit Modal */}
-              {editingClinic && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
-                    <form onSubmit={handleEditClinic}>
-                      <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0">
-                        <h4 className="text-lg font-bold text-slate-900">Editar Clínica</h4>
-                        <button type="button" onClick={() => setEditingClinic(null)} className="text-slate-400 hover:text-slate-600">
-                          <X className="w-6 h-6" />
-                        </button>
-                      </div>
-                      <div className="p-8 space-y-5">
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nombre de la Clínica</label>
-                          <input 
-                            type="text" 
-                            required
-                            value={editingClinic.name}
-                            onChange={e => setEditingClinic({...editingClinic, name: e.target.value})}
-                            className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1.5">Especialidad</label>
-                          <input 
-                            type="text" 
-                            required
-                            value={editingClinic.specialty}
-                            onChange={e => setEditingClinic({...editingClinic, specialty: e.target.value})}
-                            className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1.5">Número de WhatsApp</label>
-                          <input 
-                            type="text" 
-                            value={editingClinic.whatsappNumber || ''}
-                            onChange={e => setEditingClinic({...editingClinic, whatsappNumber: e.target.value})}
-                            className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1.5">Plan Maestro</label>
-                          <select
-                            value={editingClinic.plan}
-                            onChange={e => setEditingClinic({...editingClinic, plan: e.target.value})}
-                            className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm bg-white"
-                          >
-                            <option value="GRATIS">GRATIS</option>
-                            <option value="BASICO">BÁSICO</option>
-                            <option value="PREMIUM">PREMIUM</option>
-                          </select>
-                        </div>
-                        
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mt-4">
-                           <div className="flex items-center gap-3 text-slate-600">
-                              <ShieldCheck className="w-5 h-5 text-indigo-500" />
-                              <span className="text-xs font-medium uppercase tracking-wider">Permisos de Administrador</span>
-                           </div>
-                           <p className="text-[11px] text-slate-500 mt-2">
-                              Estás modificando una cuenta de forma externa. Los cambios se sincronizarán con el panel del usuario.
-                           </p>
-                        </div>
-                      </div>
-                      <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
-                        <button 
-                          type="button"
-                          onClick={() => setEditingClinic(null)}
-                          className="flex-1 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-                        >
-                          Cancelar
-                        </button>
-                        <button 
-                          type="submit"
-                          className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-md shadow-indigo-100"
-                        >
-                          Guardar Cambios
-                        </button>
-                      </div>
-                    </form>
+              {/* CARD 1: GOOGLE GEMINI CONFIG */}
+              <div className="bg-white border border-slate-200/80 rounded-[2rem] p-8 shadow-sm">
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <Bot className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-lg text-slate-900">Configuración de Inteligencia Artificial (Gemini)</h4>
+                      <p className="text-xs text-slate-500">Conexión directa con Google AI Studio</p>
+                    </div>
                   </div>
                 </div>
-              )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* API KEY */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-bold text-slate-700 uppercase">Gemini API Key</label>
+                      <button 
+                        type="button" 
+                        onClick={() => setShowApiKey(!showApiKey)} 
+                        className="text-xs text-indigo-600 hover:underline font-medium"
+                      >
+                        {showApiKey ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                    </div>
+                    <input 
+                      type={showApiKey ? 'text' : 'password'}
+                      value={superAdminConfig.apiKey}
+                      onChange={e => setSuperAdminConfig({ ...superAdminConfig, apiKey: e.target.value })}
+                      placeholder="AIzaSy..."
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Obtén tu clave gratuita en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">Google AI Studio ↗</a>
+                    </p>
+                  </div>
+
+                  {/* MODEL SELECTOR */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Modelo de IA</label>
+                    <select
+                      value={superAdminConfig.model}
+                      onChange={e => setSuperAdminConfig({ ...superAdminConfig, model: e.target.value })}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                    >
+                      <option value="gemini-2.0-flash">gemini-2.0-flash (Recomendado - Ultrarrápido &lt;1s)</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash (Económico y estable)</option>
+                      <option value="gemini-2.5-flash">gemini-2.5-flash (Última versión)</option>
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">Los modelos Flash responden al instante en WhatsApp.</p>
+                  </div>
+
+                  {/* MASTER SYSTEM PROMPT */}
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Prompt Maestro de WhatsApp</label>
+                    <textarea 
+                      rows={5}
+                      value={superAdminConfig.systemPrompt}
+                      onChange={e => setSuperAdminConfig({ ...superAdminConfig, systemPrompt: e.target.value })}
+                      placeholder="Instrucciones para el agente virtual..."
+                      className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-normal"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">Usa <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">{'{bookingUrl}'}</code> para que la IA entregue el enlace directo a la agenda online.</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <button 
+                    onClick={saveSuperAdminSettings}
+                    disabled={savingSuperAdmin}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl transition shadow-md shadow-indigo-600/20 text-sm disabled:opacity-50"
+                  >
+                    {savingSuperAdmin ? 'Guardando...' : 'Guardar Configuración de IA'}
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD 2: WHATSAPP BOT MONITOR */}
+              <div className="bg-white border border-slate-200/80 rounded-[2rem] p-8 shadow-sm">
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <MessageCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-lg text-slate-900">Control del Bot de WhatsApp</h4>
+                      <p className="text-xs text-slate-500">Monitoreo y parada de emergencia</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-3 h-3 rounded-full ${waStatus === 'CONNECTED' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                    <span className="text-xs font-bold uppercase text-slate-700">{waStatus}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div>
+                    <p className="font-bold text-sm text-slate-800">
+                      Estado Operativo: {clinic?.botActive ? 'EN LÍNEA (Respondiendo)' : 'PAUSADO (Manual)'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Pausa el bot si necesitas realizar pruebas o mantenimiento temporal.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => toggleBot(!clinic?.botActive)}
+                    disabled={botToggleLoading}
+                    className={`px-5 py-2.5 rounded-xl font-bold text-xs transition shadow-sm ${
+                      clinic?.botActive 
+                        ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' 
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    }`}
+                  >
+                    {botToggleLoading ? 'Procesando...' : clinic?.botActive ? 'Pausar Bot' : 'Reactivar Bot'}
+                  </button>
+                </div>
+              </div>
+
             </div>
           )}
 

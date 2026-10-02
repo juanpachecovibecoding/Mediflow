@@ -306,12 +306,82 @@ async function startWhatsAppBot(host: string) {
         continue;
       }
 
-      // 2. Respuesta con Inteligencia Artificial (Google Gemini)
-      if (ai) {
-        try {
-          const sysCfg = getSystemConfig();
-          await sock.presenceSubscribe(remoteJid);
-          await sock.sendPresenceUpdate('composing', remoteJid);
+        // 2. Detección de respuesta a recordatorios automáticos (1 = Confirmar, 2 = Cancelar/Reagendar)
+        const trimmed = textMessage.trim().toLowerCase();
+        const isConfirming = trimmed === '1' || trimmed.startsWith('1 ') || trimmed === '1️⃣' || trimmed.includes('si asisto') || trimmed.includes('confirmo');
+        const isCancelling = trimmed === '2' || trimmed.startsWith('2 ') || trimmed === '2️⃣' || trimmed.includes('no puedo') || trimmed.includes('reagendar') || trimmed.includes('cancelo');
+
+        if (isConfirming || isCancelling) {
+          try {
+            // Extraer número de teléfono del JID de WhatsApp
+            const phoneDigits = remoteJid.replace('@s.whatsapp.net', '').replace(/\D/g, '');
+            const patientsRef = getDb().collection('clinics').doc(clinicId).collection('patients');
+            
+            // Buscar paciente por teléfono (puede contener prefijo internacional)
+            const allPatientsSnap = await patientsRef.get();
+            let matchedPatient: any = null;
+            allPatientsSnap.forEach(pDoc => {
+              const pData = pDoc.data();
+              const pPhoneDigits = (pData.phone || '').replace(/\D/g, '');
+              if (pPhoneDigits && (phoneDigits.endsWith(pPhoneDigits) || pPhoneDigits.endsWith(phoneDigits))) {
+                matchedPatient = { id: pDoc.id, ...pData };
+              }
+            });
+
+            if (matchedPatient) {
+              const appointmentsRef = getDb().collection('clinics').doc(clinicId).collection('appointments');
+              // Buscar turnos próximos pendientes o programados
+              const apptsSnap = await appointmentsRef
+                .where('patientId', '==', matchedPatient.id)
+                .where('status', 'in', ['SCHEDULED', 'CONFIRMED'])
+                .get();
+
+              if (!apptsSnap.empty) {
+                // Ordenar para tomar el turno más próximo
+                const sortedDocs = apptsSnap.docs.sort((a, b) => {
+                  const dateA = `${a.data().date} ${a.data().time}`;
+                  const dateB = `${b.data().date} ${b.data().time}`;
+                  return dateA.localeCompare(dateB);
+                });
+                const targetApptDoc = sortedDocs[0];
+                const apptData = targetApptDoc.data();
+
+                if (isConfirming) {
+                  await targetApptDoc.ref.update({
+                    status: 'CONFIRMED',
+                    reminderResponse: 'CONFIRMED',
+                    updatedAt: FieldValue.serverTimestamp()
+                  });
+                  await sock.sendMessage(remoteJid, {
+                    text: `✅ ¡Perfecto ${matchedPatient.name}! Tu turno del ${apptData.date} a las ${apptData.time} hs con el ${clinic.doctorName} ha sido reconfirmado. Te esperamos en ${clinic.address}.`
+                  });
+                  botState.messagesSent += 1;
+                  continue;
+                } else if (isCancelling) {
+                  await targetApptDoc.ref.update({
+                    status: 'CANCELLED',
+                    reminderResponse: 'CANCELLED',
+                    updatedAt: FieldValue.serverTimestamp()
+                  });
+                  await sock.sendMessage(remoteJid, {
+                    text: `Comprendido ${matchedPatient.name}, hemos cancelado tu turno del ${apptData.date} a las ${apptData.time} hs para liberar el horario. Si deseas elegir una nueva fecha cuando gustes, puedes hacerlo aquí: ${bookingUrl}`
+                  });
+                  botState.messagesSent += 1;
+                  continue;
+                }
+              }
+            }
+          } catch (err) {
+            console.error('[WhatsApp] Error procesando respuesta a recordatorio:', err);
+          }
+        }
+
+        // 3. Respuesta con Inteligencia Artificial (Google Gemini)
+        if (ai) {
+          try {
+            const sysCfg = getSystemConfig();
+            await sock.presenceSubscribe(remoteJid);
+            await sock.sendPresenceUpdate('composing', remoteJid);
 
           const consultarEstadoPaciente: FunctionDeclaration = {
             name: 'consultarEstadoPaciente',
@@ -614,6 +684,79 @@ app.post('/api/whatsapp/send-reminders', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// -------------------------------------------------------------
+// Función de Cron Job: Recordatorios automáticos 24h antes
+// -------------------------------------------------------------
+async function runAutomated24hReminders() {
+  if (!activeSock || botState.status !== 'CONNECTED') {
+    return;
+  }
+
+  try {
+    const clinic = getClinicConfig();
+    const clinicId = clinic.clinicId;
+    const db = getDb();
+
+    // Calcular la fecha de mañana (YYYY-MM-DD)
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    console.log(`[AutoReminder] Verificando turnos para mañana (${tomorrowStr})...`);
+
+    const appointmentsRef = db.collection('clinics').doc(clinicId).collection('appointments');
+    const apptsSnap = await appointmentsRef
+      .where('date', '==', tomorrowStr)
+      .where('status', 'in', ['SCHEDULED', 'CONFIRMED'])
+      .get();
+
+    if (apptsSnap.empty) {
+      console.log(`[AutoReminder] No hay turnos agendados para mañana (${tomorrowStr}).`);
+      return;
+    }
+
+    for (const apptDoc of apptsSnap.docs) {
+      const appt = apptDoc.data();
+      // Omitir si ya se envió el recordatorio
+      if (appt.autoReminderSent === true) continue;
+
+      const patientDoc = await db.collection('clinics').doc(clinicId).collection('patients').doc(appt.patientId).get();
+      if (!patientDoc.exists) continue;
+
+      const patient = patientDoc.data();
+      if (!patient?.phone) continue;
+
+      const cleanNumber = patient.phone.replace(/\D/g, '');
+      const waCheck = await activeSock.onWhatsApp(cleanNumber);
+
+      if (waCheck && waCheck.length > 0 && waCheck[0].exists) {
+        const jid = waCheck[0].jid;
+        const reminderMsg = `Hola ${patient.name}! 👋 Te recordamos que mañana ${appt.date} tenés un turno a las ${appt.time} hs con el ${clinic.doctorName} en ${clinic.clinicName}.\n\nPor favor confirmá tu asistencia respondiendo a este mensaje:\n1️⃣ para CONFIRMAR tu turno.\n2️⃣ para CANCELAR o reprogramar.\n\n¡Muchas gracias!`;
+
+        await activeSock.sendMessage(jid, { text: reminderMsg });
+        botState.messagesSent += 1;
+
+        // Marcar como recordatorio enviado
+        await apptDoc.ref.update({
+          autoReminderSent: true,
+          autoReminderSentAt: FieldValue.serverTimestamp()
+        });
+
+        console.log(`[AutoReminder] Recordatorio 24h enviado exitosamente a ${patient.name} (${cleanNumber})`);
+        // Pausa preventiva de 15 segundos entre mensajes
+        await new Promise(r => setTimeout(r, 15000));
+      }
+    }
+  } catch (err) {
+    console.error('[AutoReminder] Error al ejecutar chequeo de recordatorios:', err);
+  }
+}
+
+// Ejecutar revisión cada 1 hora en segundo plano
+setInterval(runAutomated24hReminders, 60 * 60 * 1000);
+// Y una primera verificación 30 segundos tras arrancar si ya está conectado
+setTimeout(runAutomated24hReminders, 30000);
 
 // -------------------------------------------------------------
 // 7. Panel SuperAdmin (Tú: API Key, Prompts y Modelos)
