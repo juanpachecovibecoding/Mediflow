@@ -74,15 +74,42 @@ export default function BookingPortal() {
         console.error("Error fetching clinic visibility:", err);
         setLoading(false);
       });
+    } else {
+      // Fallback a clinic-config local para ruta /reservar sin parámetro
+      fetch('/api/clinic-config')
+        .then(r => r.json())
+        .then(cfg => {
+          setClinic({
+            name: cfg.clinicName,
+            doctorName: cfg.doctorName,
+            specialty: cfg.specialty,
+            whatsappNumber: cfg.whatsappNumber,
+            address: cfg.address,
+            workingHours: cfg.workingHours,
+            slotDurationMinutes: cfg.slotDurationMinutes,
+            clinicId: cfg.clinicId
+          });
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error("Error fetching local clinic config:", err);
+          setLoading(false);
+        });
     }
   }, [clinicId]);
 
+  const activeClinicId = clinicId || clinic?.clinicId || 'consultorio-dental';
+
   const checkDni = async () => {
-    if (!dni.trim() || !clinicId) return;
+    if (!dni.trim()) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/public/check-dni', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, dni }) });
+      const res = await fetch('/api/public/check-dni', { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ clinicId: activeClinicId, dni }) 
+      });
       const data = await res.json();
       if (data.found) {
         setPatient(data.patient);
@@ -103,12 +130,12 @@ export default function BookingPortal() {
   };
 
   const registerPatient = async () => {
-    if (!formData.name || !formData.phone || !clinicId) return;
+    if (!formData.name || !formData.phone) return;
     setRegistering(true);
     try {
       const fullPhone = `${formData.phonePrefix} ${formData.phone.trim()}`;
       const patientData = {
-        clinicOwnerId: clinicId,
+        clinicOwnerId: activeClinicId,
         dni,
         name: formData.name,
         phone: fullPhone,
@@ -116,7 +143,11 @@ export default function BookingPortal() {
         address: formData.address,
         healthInsurance: formData.healthInsurance
       };
-      const res = await fetch('/api/public/register', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, patient: patientData }) });
+      const res = await fetch('/api/public/register', { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ clinicId: activeClinicId, patient: patientData }) 
+      });
       const data = await res.json();
       setPatient({ id: data.id, ...patientData });
       setStep('slots');
@@ -128,12 +159,16 @@ export default function BookingPortal() {
   };
 
   const cancelAppointment = async () => {
-    if (!existingAppointment || !clinicId) return;
+    if (!existingAppointment) return;
     const confirmCancel = window.confirm("¿Está seguro que desea cancelar su turno?");
     if (!confirmCancel) return;
     setLoading(true);
     try {
-      await fetch('/api/public/cancel', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, appointmentId: existingAppointment.id }) });
+      await fetch('/api/public/cancel', { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ clinicId: activeClinicId, appointmentId: existingAppointment.id }) 
+      });
       alert("Su turno ha sido cancelado exitosamente.");
       setExistingAppointment(null);
       setDni('');
@@ -147,34 +182,45 @@ export default function BookingPortal() {
   };
 
   useEffect(() => {
-    if (selectedDate && clinicId) {
-      fetch('/api/public/slots', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, date: selectedDate }) })
+    if (selectedDate) {
+      fetch('/api/public/slots', { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ clinicId: activeClinicId, date: selectedDate }) 
+      })
         .then(r => r.json())
         .then(data => setOccupiedSlots(data.occupied || []))
         .catch(console.error);
     }
-  }, [selectedDate, clinicId]);
+  }, [selectedDate, activeClinicId]);
 
   const generateWhatsAppLink = () => {
     if (!clinic?.whatsappNumber) return '#';
-    // Clean phone number (remove non-digits, fix prefix if needed)
     const cleanPhone = clinic.whatsappNumber.replace(/\D/g, '');
-    const message = `listo, ya he reservado el turno`;
+    const patientName = patient?.name || 'Paciente';
+    // Mensaje formateado para activar la auto-confirmación de la IA en WhatsApp
+    const message = `Hola! Soy ${patientName} (DNI: ${dni}). He reservado un turno para el ${selectedDate} a las ${selectedTime}h.`;
     return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
   };
 
   const confirmReservation = async () => {
-    if (!clinicId || !patient || !selectedDate || !selectedTime) return;
+    if (!patient || !selectedDate || !selectedTime) return;
     try {
       const appointment = {
-        clinicOwnerId: clinicId,
+        clinicOwnerId: activeClinicId,
         patientId: patient.id,
         patientDni: dni,
+        patientName: patient.name,
+        phone: patient.phone,
         date: selectedDate,
         time: selectedTime,
         status: 'SCHEDULED'
       };
-      await fetch('/api/public/book', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ clinicId, appointment }) });
+      await fetch('/api/public/book', { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ clinicId: activeClinicId, appointment }) 
+      });
       window.location.href = generateWhatsAppLink();
     } catch (err) {
       console.error(err);
